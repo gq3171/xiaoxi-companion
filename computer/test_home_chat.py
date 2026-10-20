@@ -62,12 +62,17 @@ class HomeChatTests(unittest.TestCase):
         def call(path,payload=None,cookie=True,origin=True):
             c=HTTPConnection('127.0.0.1',server.server_port,timeout=3)
             headers={'Content-Type':'application/json','Origin':('https://127.0.0.1:'+str(server.server_port)) if origin else 'https://wrong.invalid'}
-            if cookie:headers['Cookie']=self.cookie
+            if cookie:headers['Cookie']=self.cookie if cookie is True else cookie
             try:
                 c.request('POST' if payload is not None else 'GET','/home/api/private-input'+path,json.dumps(payload) if payload is not None else None,headers)
                 response=c.getresponse();return response.status,json.loads(response.read())
             finally:c.close()
         try:
+            with self.chat.lock:
+                self.chat.db.execute('INSERT INTO turns VALUES(?,?,?,?,?,?,?,?)',('b'*32,self.session,'fixture','','done',json.dumps({'job_id':'a'*32}),'',int(time.time())));self.chat.db.commit()
+            self.assertTrue(call('')[1]['request']['auto_open'])
+            other='xiaoxi_home='+self.world.login(self.world.pair_code()['code'])
+            self.assertFalse(call('',cookie=other)[1]['request']['auto_open'])
             self.assertEqual(call('',cookie=False)[0],401)
             self.assertEqual(call('/claim',{'id':request['id']},origin=False)[0],403)
             status,claim=call('/claim',{'id':request['id']});self.assertEqual(status,200)

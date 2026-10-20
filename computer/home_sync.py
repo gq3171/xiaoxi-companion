@@ -411,7 +411,14 @@ class HomeHTTP:
         if path=='/home/api/private-input':
             from private_input import inputs,prepare_waiting_request
             prepare_waiting_request(self.world.desktop.store)
-            self.respond(h,200,dict(ok=True,request=inputs(self.world.desktop.store).pending(session)));return
+            request=inputs(self.world.desktop.store).pending(session)
+            if request and self.world.chat:
+                # Prefer the originating browser; another trusted device may
+                # still explicitly open the form, without an unsolicited claim.
+                with self.world.chat.lock:
+                    owner=self.world.chat.db.execute("SELECT session FROM turns WHERE json_extract(reply,'$.job_id')=? ORDER BY created DESC LIMIT 1",(request['job_id'],)).fetchone()
+                request['auto_open']=not owner or owner['session']==session
+            self.respond(h,200,dict(ok=True,request=request));return
         if path=='/home/api/desktop/session':
             from desktop_jobs import broker
             value=self.world.desktop.real_status();value.update(broker(self.world.desktop.store).state(session));self.respond(h,200,value);return

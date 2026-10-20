@@ -44,7 +44,7 @@ export function createPrivateInput({api}) {
       const renew=await api('api/private-input/claim',{id:current.id});
       if(renew.status===200){lease=renew.value.request.lease;renewed=Date.now();}else{close();$('private-status').textContent='填写权已变化，请重新打开窗口。';}
      }
-     if(pending&&!latest.claimed_elsewhere&&!current&&!dismissed.has(latest.id)&&!sending)await open(latest);
+     if(pending&&latest.auto_open!==false&&!latest.claimed_elsewhere&&!current&&!dismissed.has(latest.id)&&!sending)await open(latest);
     }
    }
   }catch{/* Preserve no secrets in error text or retry queues. */}
