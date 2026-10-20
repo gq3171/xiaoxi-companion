@@ -27,7 +27,10 @@ def run_desktop(worker,job,messages=None,first=None,ordinal=1,checked=False,last
         messages.append({'role':'user','content':json.dumps({'untrusted_tool_result':raw},ensure_ascii=False)})
     decisions=0
     def handoff(message):
-        checkpoint(phase='waiting_user');state.phase(job_id,'waiting_user',message[:500])
+        # Publish the checkpoint and explanation together. Otherwise a quick
+        # take/give_back between these writes can be overwritten by this pause.
+        with state.condition:
+            checkpoint(phase='waiting_user');state.phase(job_id,'waiting_user',message[:500])
     def stopped():
         status='interrupted' if worker.stop.is_set() else 'cancelled';store.update(job_id,status,'桌面任务已停止，页面和进度保留，未重复提交。');state.phase(job_id,'interrupted' if status=='interrupted' else 'done')
     try:

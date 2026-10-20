@@ -59,3 +59,18 @@ class ExecutorTests(unittest.TestCase):
     self.assertTrue(started.wait(3));state=broker(self.store);state.take('owner');release.set();time.sleep(.05);FakeBrowser.instances[0].registered=True;state.give_back('owner');thread.join(3)
     self.assertFalse(thread.is_alive());self.assertEqual(FakeBrowser.instances[0].clicks,0);self.assertEqual(self.store.get(self.id)['state'],'succeeded')
    finally:self.stop.set();release.set();thread.join(2)
+ def test_quick_handback_during_handoff_publication_is_not_overwritten(self):
+  replies=iter([dict(action='browser_open',url='https://example.invalid/'),dict(action='browser_type',ref='secret-field',text='NEVER_PERSIST_CREDENTIAL'),dict(action='browser_check',expected='注册演示已完成'),dict(action='finish',state='succeeded',message='完成')])
+  worker=self.worker(lambda messages:next(replies));state=broker(self.store)
+  published=threading.Event();attempted=threading.Event();returned=threading.Event();save=state.save
+  def publish(job,value,phase='running'):
+   save(job,value,phase)
+   if phase=='waiting_user':
+    published.set();attempted.wait(3);returned.wait(.2)
+  with patch('desktop_executor.DesktopBrowser',FakeBrowser),patch.object(state,'save',side_effect=publish):
+   thread=threading.Thread(target=run_desktop,args=(worker,self.job));thread.start()
+   try:
+    self.assertTrue(published.wait(3));attempted.set();state.take('owner')
+    FakeBrowser.instances[0].registered=True;state.give_back('owner');returned.set()
+    thread.join(3);self.assertFalse(thread.is_alive());self.assertEqual(self.store.get(self.id)['state'],'succeeded')
+   finally:self.stop.set();attempted.set();returned.set();thread.join(2)
