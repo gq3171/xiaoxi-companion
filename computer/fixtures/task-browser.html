@@ -1,0 +1,17 @@
+<!doctype html><html lang="zh"><meta charset="utf-8"><title>小溪电脑流程验证夹具</title>
+<style>body{font:20px sans-serif;margin:36px}label,button,p{margin:12px;display:block}</style>
+<h1>桌宠浏览器回放</h1>
+<label>验证文字<input aria-label="验证文字" id="text"></label>
+<button id="submit">保存验证结果</button><p id="result" aria-live="polite">尚未提交</p>
+<p id="count">提交次数：0</p><a href="?login=1">模拟需要人工登录</a>
+<script>
+let submissions=0;
+document.getElementById('submit').addEventListener('click',()=>{
+ submissions++;
+ document.getElementById('result').textContent='已保存：'+document.getElementById('text').value;
+ document.getElementById('count').textContent='提交次数：'+submissions;
+});
+if(new URLSearchParams(location.search).get('login')){
+ const input=document.createElement('input');input.type='password';input.setAttribute('aria-label','模拟登录密码');document.body.append(input);
+}
+</script></html>

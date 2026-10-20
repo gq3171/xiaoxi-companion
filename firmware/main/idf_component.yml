@@ -1,0 +1,10 @@
+dependencies:
+  idf: ">=5.5"
+  waveshare/esp32_s3_touch_amoled_2_16:
+    version: "^2.0.1"
+  lvgl/lvgl:
+    version: "9.*"
+  espressif/esp-sr:
+    version: "^2.4.0"
+  espressif/esp-dl:
+    version: "3.3.13"

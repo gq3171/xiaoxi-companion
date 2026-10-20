@@ -1,0 +1,24 @@
+name: Public source checks
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install native test dependencies
+        run: sudo apt-get update && sudo apt-get install -y python3-pil python3-websocket ffmpeg
+      - name: Installer contracts
+        run: python3 -m unittest discover -s scripts -p 'test_*.py'
+      - name: Brain and transport regressions (fixtures only)
+        run: python3 -m unittest discover -s computer -p 'test_*.py'
+      - name: Frontend and noVNC contracts
+        run: |
+          node computer/test_home_web.cjs
+          node computer/test_desktop_client.cjs
+          node computer/test_novnc_render.cjs

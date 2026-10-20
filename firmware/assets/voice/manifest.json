@@ -1,0 +1,13 @@
+[
+  {
+    "case": "wake_ack",
+    "text": "我在呀。",
+    "samples": 17648,
+    "sha256": "69e998a6094cd50d52083e5a39e0ecfe0711050ca07ed01f028f07f27c1ee7ce",
+    "model": "speech-2.8-hd",
+    "voice": "female-shaonv",
+    "sample_rate": 16000,
+    "channels": 1,
+    "format": "signed 16-bit little-endian PCM"
+  }
+]

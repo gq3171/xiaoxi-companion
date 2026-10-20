@@ -1,0 +1,109 @@
+menu "桌宠"
+
+config DESKPET_HOME_SYNC
+    bool "Synchronize the virtual home with the paired computer"
+    default y if DESKPET_REMOTE_BRAIN
+    depends on DESKPET_REMOTE_BRAIN
+
+config DESKPET_PANEL_CACHE
+    bool "Host-managed panel assets with verified local cache"
+    default y if DESKPET_REMOTE_BRAIN
+    default n
+    depends on IDF_TARGET_ESP32S3
+    help
+        Requires documented free cache ranges in 16MiB flash. Complete art and
+        font payloads live on the paired host; A/B caches keep offline drawing.
+        NVS, SPIFFS and the local voice/wake models retain their layout.
+
+
+config DESKPET_WAKE
+    bool "Offline wake by pet name (experimental)"
+    default y
+    depends on IDF_TARGET_ESP32S3 && SPIRAM
+    help
+        Local MultiNet5 name-repeat gate. Requires the separately provisioned model.
+        Chinese names of 1–4 characters; name polyphones use default readings.
+        No ASR upload while waiting for wake; music false alarms require testing.
+        Touching the character also opens a 20-second conversation window.
+
+config DESKPET_LOCAL_OWNER
+    bool "本地主人声纹（ESP32-S3 实验版）"
+    default n
+    depends on IDF_TARGET_ESP32S3 && SPIRAM
+    help
+        在板上运行声纹嵌入模型，不上传声纹录音。
+        需要三段录入和独立第四段复验；中文和实际环境仍需真人验证。
+
+config DESKPET_WIFI_SSID
+    string "Wi-Fi 名称"
+    default ""
+
+config DESKPET_WIFI_PASSWORD
+    string "Wi-Fi 密码"
+    default ""
+
+config DESKPET_DEEPSEEK_KEY
+    string "DeepSeek API key"
+    default ""
+
+config DESKPET_MINIMAX_KEY
+    string "MiniMax API key"
+    default ""
+
+config DESKPET_MINIMAX_HOST
+    string "MiniMax 主机"
+    default "https://api.minimaxi.com"
+
+config DESKPET_XFYUN_APP_ID
+    string "讯飞新版声纹 APPID"
+    default ""
+config DESKPET_XFYUN_API_KEY
+    string "讯飞新版声纹 APIKey"
+    default ""
+config DESKPET_XFYUN_API_SECRET
+    string "讯飞新版声纹 APISecret"
+    default ""
+
+config DESKPET_PAID_SEARCH
+    bool "Enable metered DeepSeek web search"
+    default n
+    help
+        Off by default: daily chat and reflection use MiniMax only.
+        Turn on only when paid DeepSeek web-search use is intended.
+
+config DESKPET_MINIMAX_SEARCH
+    bool "Enable MiniMax subscription web search for requested information"
+    default y
+    help
+        Use the existing MiniMax subscription key. No paid DeepSeek fallback.
+
+config DESKPET_COMPUTER_URL
+    string "Optional computer bridge HTTPS origin"
+    default ""
+    help
+        Dedicated Linux computer service. Empty keeps standalone companion mode.
+
+config DESKPET_COMPUTER_TOKEN
+    string "Computer bridge pairing token (private)"
+    default ""
+
+config DESKPET_COMPUTER_CA_FILE
+    string "Optional private-LAN computer CA PEM, relative to firmware directory"
+    default ""
+    help
+        Embed only the public CA certificate. Leave empty for public PKI.
+
+config DESKPET_REMOTE_BRAIN
+    bool "Run cloud dialogue and authoritative memory on the paired Linux brain"
+    default n
+
+config DESKPET_MEDIA
+    bool "View prepared media from the paired computer"
+    default y
+    depends on DESKPET_REMOTE_BRAIN
+
+config DESKPET_BRAIN_TOKEN
+    string "Private device-to-brain pairing token"
+    default ""
+
+endmenu

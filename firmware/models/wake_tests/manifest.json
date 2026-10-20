@@ -1,0 +1,26 @@
+[
+  {
+    "case": "xiaoxi",
+    "text": "小西小西",
+    "samples": 18391,
+    "sha256": "7dcd5fd8fa4fb511f62c17394455607fe382491f3500c90e575b37665eeae25e"
+  },
+  {
+    "case": "xiaoyue",
+    "text": "小月小月",
+    "samples": 18391,
+    "sha256": "670e2b1f0badfe8c34ebfeabe913b92d967d8a84f7b842a0a8b92a0508cade01"
+  },
+  {
+    "case": "ordinary",
+    "text": "今天晚上，我想在家里听一会音乐。",
+    "samples": 43654,
+    "sha256": "5593be21d649f011d750f8048cd57b36b974b7b1f631bd63d16d0c517ac15008"
+  },
+  {
+    "case": "near",
+    "text": "小溪流过了西边的石头。",
+    "samples": 31394,
+    "sha256": "d63939436e397da15e0e19864b087c80d82f506b1c391ffbc37c4c18f2fc4836"
+  }
+]

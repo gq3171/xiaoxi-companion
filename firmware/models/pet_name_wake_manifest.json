@@ -1,0 +1,38 @@
+{
+  "model": "mn5q8_cn",
+  "source": "espressif/esp-sr bundled component",
+  "flash_offset": "0xA00000",
+  "reserved_bytes": 3145728,
+  "packed_bytes": 2427639,
+  "sha256": "e6f384c609f23e2d7c6e6b57f5c27b08078b6c4f07a093f9b5693cf8b2bb4c07",
+  "files": {
+    "_MODEL_INFO_": {
+      "bytes": 160,
+      "sha256": "b0092f625bf2489b8243916d36647e12aa6349a6b9dd22972c580ab5fa8bdb9f"
+    },
+    "mn5q8_data": {
+      "bytes": 2201963,
+      "sha256": "ad8b051c4e995c46b6bbc4c9727d53678aabed1f452afbf2a82bd093317ae8bb"
+    },
+    "mn5q8_index": {
+      "bytes": 1536,
+      "sha256": "252740046c9383f69c2a7d2da04dd1b1fa8069ba06a20cd4f91fe495bfb26eaa"
+    },
+    "_TEST_near": {
+      "bytes": 62788,
+      "sha256": "d63939436e397da15e0e19864b087c80d82f506b1c391ffbc37c4c18f2fc4836"
+    },
+    "_TEST_ordinary": {
+      "bytes": 87308,
+      "sha256": "5593be21d649f011d750f8048cd57b36b974b7b1f631bd63d16d0c517ac15008"
+    },
+    "_TEST_xiaoxi": {
+      "bytes": 36782,
+      "sha256": "7dcd5fd8fa4fb511f62c17394455607fe382491f3500c90e575b37665eeae25e"
+    },
+    "_TEST_xiaoyue": {
+      "bytes": 36782,
+      "sha256": "670e2b1f0badfe8c34ebfeabe913b92d967d8a84f7b842a0a8b92a0508cade01"
+    }
+  }
+}

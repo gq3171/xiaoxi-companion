@@ -1,0 +1,4 @@
+# Replace this hostname with a domain pointing at the work computer.
+computer.example.com {
+    reverse_proxy 127.0.0.1:8791
+}

@@ -1,0 +1,17 @@
+--- a/src/output.c
++++ b/src/output.c
+@@ -310,6 +310,14 @@
+ 
+ int output_acquire_power_on(struct output* output)
+ {
++	/* Xiaoxi: a virtual HEADLESS/NOOP output has no physical DPMS owner.
++	 * Concurrent view/control capturers must not contend for its exclusive
++	 * wlr-output-power object or wait forever for an ON notification. */
++	if (output->is_headless) {
++		output->power = OUTPUT_POWER_ON;
++		return 1;
++	}
++
+ 	if (output->wlr_output_power)
+ 		return 1;
+ 

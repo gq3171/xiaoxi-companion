@@ -1,0 +1,22 @@
+# Model SHA256 is bound in main/pet_owner_model.h. ESP-DL 3.3.13 strips
+# operators/kernels unless the model component registers its requirements.
+kernel_abi: 1
+ops:
+  - Transpose
+  - Unsqueeze
+  - Conv
+  - Squeeze
+  - ReduceMean
+  - RequantizeLinear
+  - Sub
+  - Mul
+  - Div
+  - DequantizeLinear
+  - Sqrt
+  - QuantizeLinear
+  - Concat
+  - Gemm
+kernels:
+  - dl_tie728_s16_conv2d_hwcn_bias_relu
+  - dl_tie728_s16_conv2d_11cn_bias_relu
+  - dl_tie728_s16_conv2d_11cn_bias

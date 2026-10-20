@@ -1,0 +1,8 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>小溪注册流程演示</title>
+<style>body{font:20px sans-serif;margin:40px;background:#fff8ef;color:#463c43}main{max-width:760px;margin:auto}label{display:block;margin:20px 0}input{display:block;font:inherit;padding:10px;width:90%}button{font:inherit;padding:12px 20px;margin:12px 16px 0 0;background:#785d6e;color:white;border:0;border-radius:8px}.note{font-size:16px;color:#796a72}#result{padding:20px;background:#f6e7dc}</style>
+<main><h1>注册流程演示</h1><p class="note">只在本机验证表单操作。不创建真实账号、不发送邮件、不保存任何密码。请使用演示资料。</p>
+<section id="form"><label>演示昵称<input id="nickname" autocomplete="off"></label><label>演示邮箱<input id="email" type="email" autocomplete="off"></label>
+<label>演示密码（留空即可）<input type="password" autocomplete="new-password"></label>
+<button id="verify" type="button">模拟人工验证</button><button id="submit" type="button">完成注册演示</button><p id="message" role="status"></p></section>
+<div id="result" hidden><h2>注册演示已完成</h2><p>已核对演示资料和人工接管步骤，没有创建任何真实账户。</p></div></main>
+<script>let verified=false;document.getElementById('verify').onclick=()=>{verified=true;document.getElementById('message').textContent='人工验证演示已通过，可以完成演示。'};document.getElementById('submit').onclick=()=>{if(!document.getElementById('nickname').value||!document.getElementById('email').value||!verified){document.getElementById('message').textContent='请先填写演示昵称、邮箱并完成模拟人工验证。';return;}document.getElementById('form').hidden=true;document.getElementById('result').hidden=false;};</script></html>

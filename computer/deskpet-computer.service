@@ -1,0 +1,35 @@
+[Unit]
+Description=Xiaoxi work computer agent (NVMe data)
+After=network-online.target
+Wants=network-online.target
+RequiresMountsFor=/mnt/nvme
+ConditionPathIsMountPoint=/mnt/nvme
+
+[Service]
+Type=simple
+WorkingDirectory=/mnt/nvme/deskpet/work
+EnvironmentFile=/mnt/nvme/deskpet/config/service.env
+EnvironmentFile=/mnt/nvme/deskpet/config/brain.env
+Environment=DESKPET_EXECUTOR_USER=deskpet-work
+Environment=DESKPET_WORK_ROOT=/mnt/nvme/deskpet/work
+Environment=XDG_CACHE_HOME=/mnt/nvme/deskpet/cache
+Environment=XDG_DATA_HOME=/mnt/nvme/deskpet/data
+Environment=XDG_STATE_HOME=/mnt/nvme/deskpet/state
+Environment=TMPDIR=/mnt/nvme/deskpet/tmp
+Environment=PIP_CACHE_DIR=/mnt/nvme/deskpet/cache/pip
+Environment=UV_CACHE_DIR=/mnt/nvme/deskpet/cache/uv
+ExecStartPre=/usr/bin/mountpoint -q /mnt/nvme
+ExecStart=/usr/bin/python3 /opt/deskpet-computer/agent.py --host 0.0.0.0 --data /mnt/nvme/deskpet/state/jobs.sqlite3 --tls-cert /mnt/nvme/deskpet/config/server.pem --tls-key /mnt/nvme/deskpet/config/server.key
+StandardOutput=append:/mnt/nvme/deskpet/logs/service.log
+StandardError=append:/mnt/nvme/deskpet/logs/service.log
+Restart=on-failure
+RestartSec=5
+UMask=0077
+KillMode=control-group
+TimeoutStopSec=15
+MemoryHigh=768M
+MemoryMax=1G
+TasksMax=256
+
+[Install]
+WantedBy=multi-user.target
