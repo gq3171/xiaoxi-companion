@@ -216,5 +216,15 @@ class TaskRuntimeTests(unittest.TestCase):
         self.worker.review_model=lambda _:dict(passed=True,requirements=[dict(text='保存并展示',met=True,evidence=[1,2,3])])
         self.assertTrue(completion(self.worker,self.id,{},0)['passed'])
 
+    def test_compaction_keeps_handoff_notifications_with_their_action_group(self):
+        messages=[dict(role='user',content='anchor')]
+        for i in range(15):
+            messages.extend([dict(role='assistant',content='action '+str(i)),dict(role='user',content='result '+str(i)+'x'*2000),dict(role='user',content='owner hand-back '+str(i))])
+        bounded=window(self.worker,self.id,messages)
+        self.assertEqual(bounded[1]['role'],'assistant')
+        for i,message in enumerate(bounded):
+            if isinstance(message.get('content'),str) and message['content'].startswith('result '):
+                self.assertEqual(bounded[i-1]['role'],'assistant')
+
 
 if __name__=='__main__':unittest.main()

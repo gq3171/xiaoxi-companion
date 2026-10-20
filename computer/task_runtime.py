@@ -163,16 +163,17 @@ def window(worker, job, messages):
     budget = options()['context_bytes']
     if len(json.dumps(messages, ensure_ascii=False).encode()) <= budget:
         return messages
-    pairs = []; size = 0
-    # The first message anchors the original job; tail consists of action/result
-    # pairs. Don't leave a result detached from the action that produced it.
-    tail = messages[1:]
-    while tail:
-        pair = tail[-2:] if len(tail) >= 2 else tail[-1:]
-        n = len(json.dumps(pair, ensure_ascii=False).encode())
-        if pairs and size + n > budget // 2:
-            break
-        pairs = pair + pairs; size += n; tail = tail[:-len(pair)]
+    groups=[]
+    for message in messages[1:]:
+        if message.get('role')=='assistant' or not groups:groups.append([])
+        groups[-1].append(message)
+    pairs=[];size=0
+    # A private hand-back can add an extra user notification. Group by the
+    # assistant action boundary, rather than assuming exactly two messages.
+    for group in reversed(groups):
+        n=len(json.dumps(group,ensure_ascii=False).encode())
+        if pairs and size+n>budget//2:break
+        pairs=group+pairs;size+=n
     revision = worker.store.tasks.revision(job)
     previous_memory=worker.store.tasks.snapshot(job).get('working_memory') or {}
     cursor=max(previous_memory.get('steps',[]) or [0]) if previous_memory.get('input_revision')==revision else 0
