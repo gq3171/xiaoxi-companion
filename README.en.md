@@ -22,6 +22,8 @@ These screenshots use sample conversations and an isolated demo workspace, with 
 - **Ask for help.** Set reminders, find information, generate images or videos, or send work to the Linux host. Media results are presented in a way that suits the current device. Reminders are routed preferentially to the device where you requested them.
 - **See her computer.** With the optional desktop enabled, you can watch Xiaoxi use the browser and take control through noVNC. She combines page elements with screenshot-based visual grounding to locate controls, then checks the actual results. When a task needs an account or password, she can offer a private input form and continue after you fill it in.
 
+Long tasks keep a working summary and searchable step history, and are reviewed against your request before being marked complete. You can add requirements or keep chatting while independent requests wait in a bounded queue. See [task execution and recovery](docs/TASKS.md) for details.
+
 The ESP32 device also supports Wi-Fi setup, battery and connection indicators, physical volume buttons, touch interactions, gravity-based screen rotation, and gradual dimming and screen-off behavior that adapts to battery or external power.
 
 ## How it fits together

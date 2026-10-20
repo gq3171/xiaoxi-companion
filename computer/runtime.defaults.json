@@ -45,5 +45,13 @@
       "events": 20,
       "desktop": 8
     }
+  },
+  "tasks": {
+    "context_bytes": 32768,
+    "completion_rounds": 3,
+    "queue_limit": 8,
+    "command_timeout_seconds": 600,
+    "skill_active_limit": 64,
+    "skill_select_limit": 4
   }
 }

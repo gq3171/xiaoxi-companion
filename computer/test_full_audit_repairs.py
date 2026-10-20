@@ -129,7 +129,8 @@ class Workflow(unittest.TestCase):
         self.assertIn('结果用中文说明',seen[-1]);self.assertIn('只检查演示页面',seen[-1])
         self.assertGreaterEqual(self.store.db.execute('SELECT count(*) FROM steps').fetchone()[0],30)
         self.assertTrue(self.store.tasks.snapshot(self.id)['verified_facts'])
-        self.assertLessEqual(len(broker(self.store).load(self.id)['messages']),11)
+        from task_runtime import options
+        self.assertLessEqual(len(json.dumps(broker(self.store).load(self.id)['messages'],ensure_ascii=False).encode()),options()['context_bytes'])
 
     def test_status_focus_and_owner_control_are_bound_to_the_existing_job(self):
         broker(self.store).save(self.id,dict(browser={},messages=[],uncertain=False),phase='waiting_user')

@@ -2,17 +2,21 @@
 import json,re,time
 from pathlib import Path
 from task_context import redact
-from browser_tools import BrowserBlocked,BrowserUnavailable,BrowserCancelled
+from browser_tools import BrowserBlocked,BrowserUnavailable,BrowserCancelled,BrowserNotDispatched
 from desktop_browser import DesktopBrowser
 from desktop_jobs import broker,DesktopBusy
 from private_input import inputs,wipe
 
-ACTIONS={'browser_open','browser_tabs','browser_snapshot','browser_click','browser_type','browser_key','browser_scroll','browser_check','browser_screenshot','browser_close','browser_look','browser_visual_click','browser_session_status','browser_shutdown','handoff','workspace_write','workspace_check','workspace_preview'}
+from task_runtime import DESKTOP_TOOLS
+ACTIONS=set(DESKTOP_TOOLS)
 MUTATIONS={'browser_open','browser_click','browser_type','browser_key','browser_scroll','browser_close','browser_visual_click','browser_shutdown','workspace_write','workspace_preview'}
 def requires_browser(goal):return bool(re.search(r'浏览器|网页交互|注册|表单|登录|填写.{0,8}网站|点击.{0,8}网页',goal,re.I))
 
 def run_desktop(worker,job,messages=None,first=None,ordinal=1,checked=False,last_code=None,first_revision=None,verified_revision=None):
     store=worker.store;job_id=job['id'];state=broker(store);private=inputs(store);saved=state.load(job_id)
+    try:state.reserve(job_id)
+    except DesktopBusy:
+        store.update(job_id,'interrupted','另一项桌面任务仍保留页面，先继续或停止原任务；本次未操作桌面。');return
     workspace=worker.workspace(job_id) if hasattr(worker,'workspace') else store.path.parent.parent/'work/browser'/job_id
     workspace.mkdir(parents=True,exist_ok=True,mode=0o700)
     browser=DesktopBrowser(store,job_id,workspace,lambda:worker.cancelled(job_id));worker.active_job_id=job_id
@@ -28,7 +32,8 @@ def run_desktop(worker,job,messages=None,first=None,ordinal=1,checked=False,last
     progress=ProgressGuard();session_closed=bool((saved or {}).get('browser_session_closed'))
     def checkpoint(uncertain=None,phase='running'):
         nonlocal messages
-        if len(messages)>11:messages=messages[:1]+messages[-10:]
+        from task_runtime import window
+        messages=window(worker,job_id,messages)
         state.save(job_id,dict(messages=messages,browser=browser.checkpoint(),uncertain=bool(pending_effect) if uncertain is None else uncertain,pending_effect=pending_effect,browser_session_closed=session_closed),phase)
     def observe(result):
         raw=redact(json.dumps(browser.private_redact(result) if hasattr(browser,"private_redact") else result,ensure_ascii=False))
@@ -72,6 +77,11 @@ def run_desktop(worker,job,messages=None,first=None,ordinal=1,checked=False,last
     def stopped():
         status='interrupted' if worker.stop.is_set() else 'cancelled';store.update(job_id,status,'桌面任务已停止，页面和进度保留，未重复提交。');state.phase(job_id,'interrupted' if status=='interrupted' else 'done')
     recovery_revision=store.tasks.revision(job_id)
+    def recovery_proof(action,value):
+        nonlocal ordinal
+        output=redact(json.dumps(value,ensure_ascii=False))
+        store.record(job_id,ordinal,action,'passive recovery verification',0,output)
+        store.tasks.outcome(job_id,ordinal,action,0,output,True,revision=recovery_revision);ordinal+=1
     try:
         if saved and (session_closed or pending_effect and pending_effect.get('action')=='browser_shutdown'):
             # No page exists after browser shutdown. Verify the passive session
@@ -81,6 +91,7 @@ def run_desktop(worker,job,messages=None,first=None,ordinal=1,checked=False,last
                 session_closed=True
                 if not pending_effect or pending_effect.get('action') in ('browser_shutdown','browser_close'):
                     pending_effect=None;checked=True;last_code=0;verified_revision=recovery_revision
+                    recovery_proof('browser_session_status',value)
         elif saved:
             restored=saved.get('browser')
             if pending_effect and pending_effect.get('action')=='browser_close' and pending_effect.get('tab'):
@@ -95,6 +106,7 @@ def run_desktop(worker,job,messages=None,first=None,ordinal=1,checked=False,last
                 pending_effect=None
                 if not present:
                     checked=True;last_code=0;verified_revision=recovery_revision
+                    recovery_proof('browser_check',dict(closed=True,tab=target,verification='task_target_absent'))
                     restored=dict(restored or {})
                     restored['tabs']=[x for x in restored.get('tabs',[]) if x!=target]
                     restored['owned']=[x for x in restored.get('owned',[]) if x!=target]
@@ -141,8 +153,17 @@ def run_desktop(worker,job,messages=None,first=None,ordinal=1,checked=False,last
             if revision!=store.tasks.revision(job_id):first=None;pending_image=None;continue
             if state.waiting(job_id):continue # Discard a model reply arriving after takeover.
             action=reply.get('action');tab=reply.get('tab')
-            if action=='task_plan':
-                store.tasks.plan(job_id,reply.get('plan'));checkpoint();continue
+            from task_runtime import control_tool
+            try:control_result=control_tool(worker,job_id,reply,ordinal,revision,desktop=True)
+            except ValueError as error:control_result=dict(error=str(error),dispatched=False)
+            if control_result is not None:
+                store.record(job_id,ordinal,action,json.dumps(reply,ensure_ascii=False) if action!='command_start' else 'rejected command capability',0 if 'error' not in control_result else 1,json.dumps(control_result,ensure_ascii=False));ordinal+=1
+                messages.append(dict(role='assistant',content=json.dumps(dict(action=action),ensure_ascii=False)));observe(control_result);checkpoint()
+                if control_result.get('requires_reconciliation'):
+                    checkpoint(phase='interrupted');store.update(job_id,'interrupted','受管理命令的结果需要核对，没有重放。');state.phase(job_id,'interrupted');return
+                if 'error' in control_result and progress.stalled(action,control_result,1):
+                    checkpoint(phase='interrupted');store.update(job_id,'interrupted','任务工具连续无效，页面与进度保留。');state.phase(job_id,'interrupted');return
+                continue
             if action not in ('browser_look','browser_visual_click') and hasattr(browser,'visual_clear'):browser.visual_clear()
             if action=='handoff':
                 if not browser.tabs:observe({'error':'请先用browser_open打开本任务页面，再交给主人处理。'});continue
@@ -155,8 +176,22 @@ def run_desktop(worker,job,messages=None,first=None,ordinal=1,checked=False,last
                     checkpoint(phase='interrupted');store.update(job_id,'interrupted','有一步操作结果尚未核对，未自动重发。');state.phase(job_id,'interrupted');return
                 if status=='succeeded' and (not checked or last_code!=0 or verified_revision!=revision):
                     observe({'error':'尚未通过当前实际页面的验证，请browser_check核对，不能假报成功。'});continue
+                if status=='succeeded':
+                    from task_runtime import completion
+                    result=completion(worker,job_id,reply,revision)
+                    if not result['passed']:
+                        if result.get('exhausted'):
+                            checkpoint(phase='interrupted');store.update(job_id,'interrupted','逐项验收仍有缺项，页面与进度已保存，未宣称完成。');state.phase(job_id,'interrupted');return
+                        observe(dict(completion_review=result));continue
+                manager=getattr(worker,'managed',None)
+                if manager and manager.thread and manager.thread.is_alive():
+                    observe(dict(error='受管理命令仍在执行，请先查询handle。'));continue
+                with store.lock:unknown=store.db.execute("SELECT 1 FROM task_handles WHERE job=? AND state='interrupted'",(job_id,)).fetchone()
+                if unknown:
+                    checkpoint(phase='interrupted');store.update(job_id,'interrupted','受管理命令结果尚未核对，没有自动重做。');state.phase(job_id,'interrupted');return
                 checkpoint()
                 if not store.update(job_id,status,str(reply.get('message') or '当前任务已结束。'),expected_revision=revision):continue
+                if store.get(job_id)['state']=='succeeded':store.learn(job_id,reply.get('skill'))
                 state.phase(job_id,'done');return
             if action not in ACTIONS and action not in ('run','check'):raise ValueError('unknown desktop task action')
             if action=='browser_close' and (tab or browser.current) not in browser.tabs:
@@ -232,6 +267,9 @@ def run_desktop(worker,job,messages=None,first=None,ordinal=1,checked=False,last
                 # Never persist a password/OTP candidate from a rejected type action.
                 if action in MUTATIONS:pending_effect=None
                 store.record(job_id,ordinal,'desktop_handoff','protected step',0,'等待主人处理；未发送受保护输入。');ordinal+=1;handoff(str(error));continue
+            except BrowserNotDispatched as error:
+                if action in MUTATIONS:pending_effect=None
+                result=dict(error=str(error)[:240],error_class='not_dispatched',observe_again=True,next_action='browser_snapshot');code=1
             except (ValueError,BrowserUnavailable) as error:
                 result={'error':str(error)[:240],'observe_again':True};code=1
             if action=='browser_snapshot' and hasattr(browser,'private_form'):
@@ -252,7 +290,9 @@ def run_desktop(worker,job,messages=None,first=None,ordinal=1,checked=False,last
             store.record(job_id,ordinal,str(action),command,code,output);ordinal+=1
             store.tasks.outcome(job_id,ordinal-1,str(action),code,output,passed,revision=revision)
             messages.append({'role':'assistant','content':command});observe(result);checkpoint()
-            if progress.stalled(action,json.loads(output),code,action in MUTATIONS,passed):
+            stalled=progress.stalled(action,json.loads(output),code,action in MUTATIONS,passed)
+            if code and progress.errors==2:observe(dict(replan_required=True,next='重新观察当前页面并更新task_plan；无效ref不是未知提交结果，先刷新定位；未知提交结果仍只读核对。'))
+            if stalled:
                 checkpoint(phase='interrupted');store.update(job_id,'interrupted','连续核对未获得新进展，已暂停无效重试。现有页面和待核对结果保留，需要修正工具或补充要求后再继续。');state.phase(job_id,'interrupted');return
         terminal='interrupted' if pending_effect else 'failed'
         store.update(job_id,terminal,'浏览器步骤预算已用完；实际页面和待核对结果保留，没有假报完成。');state.phase(job_id,'interrupted' if pending_effect else 'done')

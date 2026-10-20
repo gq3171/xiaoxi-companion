@@ -15,6 +15,13 @@ class DesktopJobs:
         self.store=store;self.clock=clock;self.condition=threading.Condition(store.lock);self.lease=None;self.inflight=False;self.transports={};self.last_input_report=0.
         with store.lock:
             store.db.execute('CREATE TABLE IF NOT EXISTS desktop_jobs(job TEXT PRIMARY KEY,phase TEXT NOT NULL,checkpoint TEXT NOT NULL,updated INTEGER NOT NULL)');store.db.commit()
+    def reserve(self,job):
+        # One actual GUI: a suspended task's unresolved page must not become a
+        # new task's starting state. Independent command jobs may still run.
+        with self.condition:
+            row=self.store.db.execute("SELECT d.job FROM desktop_jobs d JOIN jobs j ON j.id=d.job WHERE d.job!=? AND d.phase!='done' AND j.state IN ('running','interrupted') LIMIT 1",(job,)).fetchone()
+            if row:raise DesktopBusy('另一项桌面任务仍保留待核对页面，请先继续或停止原任务。')
+
     def _row(self,job):
         return self.store.db.execute('SELECT * FROM desktop_jobs WHERE job=?',(job,)).fetchone()
     def save(self,job,value,phase='running'):

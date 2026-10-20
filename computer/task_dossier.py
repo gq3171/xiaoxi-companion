@@ -3,7 +3,8 @@
 Only owner inputs may amend instructions; the planner may update a proposed
 plan, never manufacture owner decisions or verified tool evidence.
 """
-import hashlib,json,re,time
+import hashlib,json,re,time,uuid
+from task_context import redact
 
 ID=re.compile(r'[0-9a-f]{32}\Z')
 
@@ -20,6 +21,9 @@ class TaskDossiers:
     def __init__(self,store):
         self.store=store
         store.db.executescript('''
+        CREATE TABLE IF NOT EXISTS task_events(id TEXT PRIMARY KEY,job TEXT NOT NULL,ordinal INTEGER NOT NULL,action TEXT NOT NULL,exit_code INTEGER NOT NULL,revision INTEGER NOT NULL,verified INTEGER NOT NULL,summary TEXT NOT NULL);
+        CREATE INDEX IF NOT EXISTS task_events_job ON task_events(job,ordinal);
+        CREATE TABLE IF NOT EXISTS task_handles(id TEXT PRIMARY KEY,job TEXT NOT NULL,state TEXT NOT NULL,revision INTEGER NOT NULL,ordinal INTEGER NOT NULL,result TEXT NOT NULL,updated INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS task_dossiers(job TEXT PRIMARY KEY,value TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS task_inputs(seq INTEGER PRIMARY KEY AUTOINCREMENT,
           job TEXT NOT NULL,id TEXT UNIQUE NOT NULL,text TEXT NOT NULL,created INTEGER NOT NULL);
@@ -84,23 +88,51 @@ class TaskDossiers:
                 self._save(job,value)
             return value
 
-    def plan(self,job,value):
+    def plan(self,job,value,revision=None):
         if not isinstance(value,dict) or set(value)-{'completion_conditions','plan','next_step','blocker'}:
             raise ValueError('planner cannot replace owner decisions or evidence')
-        updates={k:items(v,12,480) if k in ('completion_conditions','plan') else bounded(v,1024) for k,v in value.items()}
         with self.store.lock,self.store.db:
             current=self.snapshot(job)
             if current is None:raise ValueError('missing task')
-            current.update(updates);self._save(job,current)
+            expected=current['input_revision'] if revision is None else revision
+            if expected!=current['input_revision'] or self.store.get(job)['cancel']:raise ValueError('stale plan')
+            updates={}
+            for key,data in value.items():
+                if key not in ('completion_conditions','plan'):
+                    updates[key]=bounded(data,1024);continue
+                if not isinstance(data,list) or len(data)>12:raise ValueError('task list budget')
+                entries=[];identities=set()
+                for i,item in enumerate(data):
+                    if isinstance(item,str):entries.append(bounded(item,480));continue
+                    allowed={'id','text','evidence'} if key=='completion_conditions' else {'id','text','status','depends_on','evidence'}
+                    if not isinstance(item,dict) or set(item)-allowed:raise ValueError('invalid plan item')
+                    item=dict(item);text=bounded(item.get('text'),480)
+                    ident=item.setdefault('id',str(i+1))
+                    if not isinstance(ident,str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,40}',ident) or ident in identities:raise ValueError('invalid plan identity')
+                    identities.add(ident)
+                    refs=item.get('evidence',[])
+                    if refs:
+                        from task_runtime import valid_refs
+                        if not valid_refs(self.store,job,refs,expected,True):raise ValueError('plan cites unverified evidence')
+                    if key=='plan':
+                        if item.get('status','pending') not in ('pending','running','done','blocked'):raise ValueError('invalid plan status')
+                        if item.get('status')=='done' and not refs:raise ValueError('completed step needs evidence')
+                        deps=item.get('depends_on',[])
+                        if not isinstance(deps,list) or any(not isinstance(x,str) or x not in identities-{ident} for x in deps):raise ValueError('dependencies must precede this step')
+                    entries.append(item)
+                updates[key]=entries
+            current.update(updates);current['plan_revision']=expected;self._save(job,current)
 
     def outcome(self,job,ordinal,action,code,summary,verified=False,revision=None):
         # Callers pass already-redacted evidence, never private field values.
-        summary=str(summary).encode()[:512].decode('utf-8','ignore')
+        summary=redact(str(summary)).encode()[:512].decode('utf-8','ignore')
         with self.store.lock,self.store.db:
             current=self.snapshot(job)
             if current is None:return
-            fact=dict(step=ordinal,action=action,exit_code=code,summary=summary,input_revision=current['input_revision'] if revision is None else revision,
+            event_id=uuid.uuid4().hex
+            fact=dict(evidence_id=event_id,step=ordinal,action=action,exit_code=code,summary=summary,input_revision=current['input_revision'] if revision is None else revision,
                       evidence_sha256=hashlib.sha256(summary.encode()).hexdigest())
+            self.store.db.execute('INSERT INTO task_events VALUES(?,?,?,?,?,?,?,?)',(event_id,job,ordinal,action,code,fact['input_revision'],int(verified),summary))
             current['recent_outcomes']=(current['recent_outcomes']+[fact])[-12:]
             if verified:current['verified_facts']=(current['verified_facts']+[fact])[-32:]
             self._save(job,current)

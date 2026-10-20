@@ -182,8 +182,11 @@ class HomeChat:
         elif action=='computer_task':
             goal=answer.get('task');store.admit(request)
             if not isinstance(goal,str) or not goal.strip() or len(goal.encode())>1024:raise ValueError('invalid task')
-            try:job=self.computer.submit(op_id(turn,'job'),goal,original_request=candidate);say='好呀，我去弄。你可以继续和我聊。'
-            except ValueError:say='电脑上还有一项任务正在进行，这次没有重复提交。'
+            try:
+                job=self.computer.submit(op_id(turn,'job'),goal,original_request=candidate)
+                with self.computer.lock:busy=self.computer.db.execute("SELECT 1 FROM jobs WHERE state='running' AND id!=?",(job['id'],)).fetchone()
+                say='好呀，已排进队列，前面的任务结束后接着做。你可以继续和我聊。' if busy else '好呀，我去弄。你可以继续和我聊。'
+            except ValueError:say='这次没有提交成功，可能队列已满；我先保留当前任务，请查看任务状态。'
         elif action in ('computer_resume','computer_update'):
             from task_control import control
             note=answer.get('task_note',candidate if action=='computer_update' else '')

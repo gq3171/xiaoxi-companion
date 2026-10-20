@@ -23,4 +23,6 @@ def clean_skill(candidate):
     fields = ('name', 'when', 'method', 'check')
     if any(not isinstance(candidate.get(key), str) or redact(candidate[key]) != candidate[key] for key in fields):
         return None
-    return {key: candidate[key] for key in fields}
+    for key in ('applicability','pitfalls'):
+        if key in candidate and (not isinstance(candidate[key],str) or len(candidate[key].encode())>800 or redact(candidate[key])!=candidate[key]):return None
+    return {key:candidate[key] for key in fields+('applicability','pitfalls') if key in candidate}

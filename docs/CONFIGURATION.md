@@ -61,3 +61,7 @@
 - 回归夹具中的示例地址、独立测试端口，以及容量基准访问的演示网站不是生产目标地址。新增功能时也不得重新引入个人服务器地址。
 
 `options.desktop.browser_vision`（布尔，默认 `true`）控制浏览器的截图图片输入与定位工具。纯文本后端设 `false`；环境 `DESKPET_BROWSER_VISION=0|1` 可覆盖。它复用当前模型，不自动添加另一家模型或凭据。坐标新鲜度、隐私与命中检查见 [DESKTOP.md](DESKTOP.md)。
+
+## 任务运行参数
+
+`options.tasks` 可覆盖 `context_bytes`（默认 32768，范围 8192–65536）、`completion_rounds`（3，1–5）、`queue_limit`（8，1–32）、`command_timeout_seconds`（受管理命令默认 600，30–1800）、`skill_active_limit`（64，16–256）、`skill_select_limit`（4，1–8）。这些是容量和执行预算，不是安全开关。普通同步命令仍采用 120 秒上限；较长的已授权步骤使用受管理句柄。具体恢复和验收行为见 [TASKS.md](TASKS.md)。

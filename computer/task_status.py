@@ -17,7 +17,7 @@ def select(store,job=None,history=False,focus=None):
             if not rows and job:return []
         else:rows=[]
         if not rows:
-            rows=store.db.execute("SELECT id,goal,state,message FROM jobs ORDER BY CASE WHEN state IN ('running','queued') THEN 0 ELSE 1 END,created DESC,rowid DESC LIMIT ?",(3 if history else 1,)).fetchall()
+            rows=store.db.execute("SELECT id,goal,state,message FROM jobs ORDER BY CASE WHEN state='running' THEN 0 WHEN state='queued' THEN 1 WHEN state='interrupted' THEN 2 ELSE 3 END,created DESC,rowid DESC LIMIT ?",(3 if history else 1,)).fetchall()
         desktop=store.db.execute("SELECT 1 FROM sqlite_master WHERE name='desktop_jobs'").fetchone()
         result=[]
         for row in rows:

@@ -9,6 +9,7 @@ import json
 import re
 import time
 from recall import terms
+from runtime_config import settings
 
 
 def bounded(value, budget):
@@ -29,12 +30,12 @@ class Skills:
     def select(self, goal):
         query = set(terms(goal))
         ranked = []
-        for row in self.db.execute('SELECT * FROM task_skills WHERE active=1 ORDER BY created DESC LIMIT 16'):
+        for row in self.db.execute('SELECT * FROM task_skills WHERE active=1 ORDER BY created DESC LIMIT ?', (settings()['tasks']['skill_active_limit'],)):
             score = len(query & set(terms(row['name']+' '+row['description'])))
             if score:
-                ranked.append((score, dict(row)))
+                ranked.append((score + min(row['successes'],5) - min(row['failures'],5), dict(row)))
         ranked.sort(key=lambda x:x[0], reverse=True)
-        return [{k:r[k] for k in ('id','name','description','content','successes','failures')} for _,r in ranked[:2]]
+        return [{k:r[k] for k in ('id','name','description','content','successes','failures')} for _,r in ranked[:settings()['tasks']['skill_select_limit']]]
 
     def use(self, job, selected):
         self.db.executemany('INSERT OR IGNORE INTO skill_uses(job,skill) VALUES(?,?)', ((job,r['id']) for r in selected))
@@ -58,8 +59,8 @@ class Skills:
         if not all((name,description,method,check)):
             return None
         original = self.db.execute('SELECT state,goal FROM jobs WHERE id=?', (job,)).fetchone()
-        verification = self.db.execute("SELECT max(ordinal) FROM steps WHERE job=? AND kind IN ('check','browser_check') AND exit_code=0", (job,)).fetchone()[0]
-        mutation = self.db.execute("SELECT max(ordinal) FROM steps WHERE job=? AND kind IN ('run','browser_open','browser_click','browser_type','browser_key','browser_scroll','write_artifact')", (job,)).fetchone()[0] or 0
+        verification = self.db.execute("SELECT max(ordinal) FROM steps WHERE job=? AND kind IN ('check','browser_check','workspace_check','browser_session_status','browser_shutdown') AND exit_code=0", (job,)).fetchone()[0]
+        mutation = self.db.execute("SELECT max(ordinal) FROM steps WHERE job=? AND kind IN ('run','browser_open','browser_click','browser_type','browser_key','browser_scroll','write_artifact','workspace_write','workspace_preview','browser_visual_click','browser_shutdown')", (job,)).fetchone()[0] or 0
         if verification is not None and mutation>verification:return None
         if not original or original['state']!='succeeded' or not verification:
             return None
@@ -67,13 +68,13 @@ class Skills:
         # unrelated lesson. This is a relevance guard, not proof of all semantics.
         if not set(terms(name+' '+description)) & set(terms(original['goal'])):
             return None
-        content = json.dumps(dict(method=method,check=check,source_job=job), ensure_ascii=False)
+        content = json.dumps(dict(method=method,check=check,source_job=job,applicability=candidate.get('applicability','每次先核对当前环境，不沿用旧页面引用或命令权限'),pitfalls=candidate.get('pitfalls','未知结果先只读核对，不能重放'),version=1,evidence_step=verification), ensure_ascii=False)
         identity = hashlib.sha256((name+'\0'+content).encode()).hexdigest()[:32]
         self.db.execute('UPDATE task_skills SET active=0 WHERE name=?', (name,))
         self.db.execute('INSERT OR IGNORE INTO task_skills(id,name,description,content,source_job,created) VALUES(?,?,?,?,?,?)',
                         (identity,name,description,content,job,int(time.time())))
         self.db.execute('UPDATE task_skills SET active=1 WHERE id=?', (identity,))
-        self.db.execute('UPDATE task_skills SET active=0 WHERE id IN (SELECT id FROM task_skills WHERE active=1 ORDER BY created DESC,rowid DESC LIMIT -1 OFFSET 16)')
-        self.db.execute('DELETE FROM task_skills WHERE active=0 AND id IN (SELECT id FROM task_skills WHERE active=0 ORDER BY created DESC,rowid DESC LIMIT -1 OFFSET 32)')
+        self.db.execute('UPDATE task_skills SET active=0 WHERE id IN (SELECT id FROM task_skills WHERE active=1 ORDER BY created DESC,rowid DESC LIMIT -1 OFFSET ?)', (settings()['tasks']['skill_active_limit'],))
+        self.db.execute('DELETE FROM task_skills WHERE active=0 AND id IN (SELECT id FROM task_skills WHERE active=0 ORDER BY created DESC,rowid DESC LIMIT -1 OFFSET ?)', (settings()['tasks']['skill_active_limit']*2,))
         self.db.execute('DELETE FROM skill_uses WHERE skill NOT IN (SELECT id FROM task_skills)')
         return identity

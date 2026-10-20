@@ -23,6 +23,9 @@ BROWSER_HOME=browser_root()
 
 
 class BrowserUnavailable(RuntimeError): pass
+class BrowserNotDispatched(BrowserUnavailable):
+    """Known validation failure before any input event was dispatched."""
+    pass
 class BrowserBlocked(RuntimeError):
     def __init__(self,message,page=None):
         super().__init__(message);self.page=page
@@ -131,7 +134,7 @@ class Browser:
         if parsed.scheme not in ('http','https') or not parsed.hostname or parsed.username or parsed.password:
             raise ValueError('网页地址需要无内嵌凭据的HTTP或HTTPS地址')
         self.ensure()
-        if len(self.tabs)>=3:raise BrowserUnavailable('本任务最多三个标签，请先关闭不用的页面')
+        if len(self.tabs)>=3:raise BrowserNotDispatched('本任务最多三个标签，请先关闭不用的页面')
         info=self.json_request('/json/new?about:blank','PUT');tab=info['id']
         page=CDP(info['webSocketDebuggerUrl'],self.cancelled);self.tabs[tab]=page;self.current=tab
         self.owned_targets.add(tab)
@@ -147,7 +150,7 @@ class Browser:
         import html
         if not isinstance(text,str) or len(text.encode())>65536:raise ValueError('preview text budget')
         self.ensure()
-        if len(self.tabs)>=3:raise BrowserUnavailable('本任务最多三个标签')
+        if len(self.tabs)>=3:raise BrowserNotDispatched('本任务最多三个标签')
         info=self.json_request('/json/new?about:blank','PUT');tab=info['id']
         page=CDP(info['webSocketDebuggerUrl'],self.cancelled);self.tabs[tab]=page;self.current=tab;self.owned_targets.add(tab)
         page.call('Page.enable');page.call('Accessibility.enable')
@@ -184,8 +187,8 @@ class Browser:
     def element(self, ref, tab=None):
         page=self.page(tab);snapshot=self.snapshots.get(self.current,{})
         item=snapshot.get('refs',{}).get(ref)
-        if not item or snapshot['document']!=self.document(page):raise BrowserUnavailable('元素引用已过期，请重新读取页面')
-        if item['disabled']:raise BrowserUnavailable('该控件当前不可操作')
+        if not item or snapshot['document']!=self.document(page):raise BrowserNotDispatched('元素引用已过期，请重新读取页面')
+        if item['disabled']:raise BrowserNotDispatched('该控件当前不可操作')
         return page,item
 
     def before_activate(self, page, item, mode):
@@ -209,9 +212,9 @@ class Browser:
         nodes=page.call('Accessibility.getPartialAXTree',dict(backendNodeId=item['backend'],fetchRelatives=False)).get('nodes',[])
         node=next((n for n in nodes if n.get('backendDOMNodeId')==item['backend']),{})
         if node.get('ignored') or node.get('role',{}).get('value')!=item['role'] or str(node.get('name',{}).get('value',''))[:240]!=item['name']:
-            raise BrowserUnavailable('控件身份或文字已变化，请重新读取页面')
+            raise BrowserNotDispatched('控件身份或文字已变化，请重新读取页面')
         remote=page.call('DOM.resolveNode',dict(backendNodeId=item['backend'])).get('object',{}).get('objectId')
-        if not remote:raise BrowserUnavailable('控件已经离开页面，请重新读取')
+        if not remote:raise BrowserNotDispatched('控件已经离开页面，请重新读取')
         # Fixed adapter-owned read-only JS; never source or selectors supplied
         # by the model. A bounding-box center alone may hit an overlay instead.
         function='''function(){
@@ -233,11 +236,11 @@ class Browser:
             for sample in range(2):
                 value=page.call('Runtime.callFunctionOn',dict(objectId=remote,functionDeclaration=function,returnByValue=True)).get('result',{}).get('value',{})
                 if not value.get('visible') or not value.get('enabled') or not value.get('point') or value.get('framed') or (editable and not value.get('editable')):
-                    raise BrowserUnavailable('控件隐藏、遮挡、不可编辑或框架坐标尚不能核对；请重新观察')
+                    raise BrowserNotDispatched('控件隐藏、遮挡、不可编辑或框架坐标尚不能核对；请重新观察')
                 bounds=[value.get(k) for k in ('left','top','width','height')]
                 point=[value['point'].get(k) for k in ('x','y')]
-                if any(type(x) not in (int,float) or not math.isfinite(x) for x in bounds+point):raise BrowserUnavailable('控件位置无效')
-                if previous and any(abs(a-b)>1 for a,b in zip(previous,bounds)):raise BrowserUnavailable('控件仍在移动，请等待并重新读取')
+                if any(type(x) not in (int,float) or not math.isfinite(x) for x in bounds+point):raise BrowserNotDispatched('控件位置无效')
+                if previous and any(abs(a-b)>1 for a,b in zip(previous,bounds)):raise BrowserNotDispatched('控件仍在移动，请等待并重新读取')
                 previous=bounds
                 if sample==0:time.sleep(.05)
             return point

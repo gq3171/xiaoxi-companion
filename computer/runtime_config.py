@@ -34,7 +34,7 @@ def validate(options):
         if not isinstance(result['speech'][field],str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,100}',result['speech'][field]):raise ValueError('invalid speech configuration')
     if not voice_valid(result['speech']['openai_voice']):raise ValueError('invalid compatible voice ID')
     if not voice_valid(result['speech']['default_voice']):raise ValueError('invalid default voice ID')
-    bounds={'speech.openai_pcm_rate':(8000,48000),'llm.timeout_seconds':(5,120),'llm.dialogue_max_tokens':(256,65536),'llm.reflection_max_tokens':(256,65536),
+    bounds={'tasks.context_bytes':(8192,65536),'tasks.completion_rounds':(1,5),'tasks.queue_limit':(1,32),'tasks.command_timeout_seconds':(30,1800),'tasks.skill_active_limit':(16,256),'tasks.skill_select_limit':(1,8),'speech.openai_pcm_rate':(8000,48000),'llm.timeout_seconds':(5,120),'llm.dialogue_max_tokens':(256,65536),'llm.reflection_max_tokens':(256,65536),
             'desktop.cdp_port':(1024,65535),'desktop.probe_cdp_port':(1024,65535),'desktop.max_fps':(1,30),
             'desktop.headless_idle_seconds':(30,86400),'web.preview_port':(1024,65535),
             'http.connection_limit':(4,128),'http.handshake_limit':(1,32),'http.handshake_timeout':(1,30)}

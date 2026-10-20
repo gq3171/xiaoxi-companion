@@ -29,8 +29,8 @@ class ComputerAgentTests(unittest.TestCase):
         self.assertEqual(self.store.submit(ID, "检查系统")["id"], first["id"])
         with self.assertRaises(ValueError):
             self.store.submit(ID, "另一个任务")
-        with self.assertRaises(ValueError):
-            self.store.submit("b" * 32, "不能并发提交")
+        self.assertEqual(self.store.submit("b" * 32, "队列中的独立任务")["state"],"queued")
+        self.store.cancel("b" * 32)
         self.store.cancel(ID)
         self.assertEqual(self.store.submit(ID, "检查系统")["state"], "cancelled")
         tombstone = "c" * 32
