@@ -2,11 +2,12 @@
 """Public site diagnostic, run on RK after capacity_benchmark.py stops.
 
 Keeps site failures and relevance failures in results; no CAPTCHA bypass.
-Requires the benchmark copy in /mnt/nvme/deskpet/data/capacity-test.
+Requires the benchmark copy under the configured data directory.
 """
 import importlib.util,json,subprocess,time,contextlib
 from pathlib import Path
-base=Path('/mnt/nvme/deskpet/data/capacity-test');out=base/'public-probe';out.mkdir(exist_ok=True)
+from deployment_paths import data_root
+base=data_root()/'data/capacity-test';out=base/'public-probe';out.mkdir(exist_ok=True)
 assert subprocess.run(['systemctl','is-active','--quiet','deskpet-capacity-benchmark-v3']).returncode != 0, 'wait for soak completion'
 spec=importlib.util.spec_from_file_location('capacity',base/'benchmark.py');m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
 m.BASE=out

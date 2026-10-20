@@ -19,7 +19,7 @@
 ESP32 屏幕 / 麦克风 / 触摸 ── HTTPS ──┐
                                     ├─ Linux 主脑 ── 模型 / ASR / TTS
 PC 浏览器：房间 / 聊天 / 桌面 ─ HTTPS ┘       │
-                                           ├─ NVMe 记忆、任务、媒体、缓存
+                                           ├─ 用户选择的数据目录：记忆、任务、媒体、缓存
                                            └─ 专用 Linux 桌面 / 浏览器 / 工作用户
 ```
 
@@ -35,9 +35,19 @@ cd xiaoxi-companion
 ./install.sh --check --json
 ```
 
-**请让部署代理先读 [INSTALL_FOR_AGENTS.md](docs/INSTALL_FOR_AGENTS.md)**。里面有操作顺序、配置合同、验收命令、退出码、不可自动处理的情况。人类安装说明见 [INSTALL.md](docs/INSTALL.md)。
+首次安装推荐直接运行向导：
 
-Linux 主脑安装器面向 Debian/Ubuntu、Python 3.11+、systemd、aarch64/x86_64，要求数据盘已挂载到 `/mnt/nvme`。它不分区、不格式化、不修改路由器、不自动刷板子。安装器只引导主脑和网页；**真实桌面另按 [DESKTOP.md](docs/DESKTOP.md) 配置**。
+```sh
+sudo ./install.sh --setup
+```
+
+只需确认四项：**数据目录、访问域名或局域网 IP、你开通的后端模型名称、该模型的 API Key**。Key 隐藏输入；其余依赖安装、原生库/素材生成、服务 Token、证书与启动检查自动完成。当前集成 MiniMax，不能直接填入另一家服务的 Key。
+
+数据目录由你提供，不要求磁盘叫 NVMe，也不要求挂载到特定位置；例如 `/srv/fastdisk/xiaoxi`、`/data/pets/xiaoxi` 都可以。填写一个挂载点时会使用它下面的 `xiaoxi` 专用子目录。安装后路径会保存，桌面、浏览器和维护工具共用配置，不必重复填写。
+
+**部署代理先读 [INSTALL_FOR_AGENTS.md](docs/INSTALL_FOR_AGENTS.md)**；自动化安装可以使用 `--data-dir`、`--hostname`、`--model` 和私有 `--env-file`。配置全表见 [CONFIGURATION.md](docs/CONFIGURATION.md)，人类安装说明见 [INSTALL.md](docs/INSTALL.md)。
+
+安装器面向 Debian/Ubuntu、Python 3.11+、systemd、aarch64/x86_64。它不分区、不格式化、不修改路由器、不自动刷板子；可选真实桌面见 [DESKTOP.md](docs/DESKTOP.md)。
 
 - [ESP32 编译与连接](firmware/README.md)
 - [源码与测试](docs/DEVELOPMENT.md)

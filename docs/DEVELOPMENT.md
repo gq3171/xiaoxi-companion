@@ -18,10 +18,15 @@ python3 -m unittest discover -s computer -p 'test_*.py'
 node computer/test_home_web.cjs
 node computer/test_desktop_client.cjs
 node computer/test_novnc_render.cjs
+python3 -m unittest discover -s firmware/tests -p 'test_cloud_host.py'
+python3 -m unittest discover -s firmware/tests -p 'test_voice_selection.py'
+python3 -m unittest discover -s firmware/tests -p 'test_runtime_core.py'
 ```
 
-`test_brain.py` 在托管 IDF cJSON 未下载时使用带许可证的 `computer/vendor/cjson`。完整固件构建请按 `firmware/README.md`，它会解析 BSP、LVGL、ESP-SR/ESP-DL 等依赖，不将本机 `managed_components` 提交进仓库。
+`test_brain.py` 和上述固件 host 夹具在托管 IDF cJSON 未下载时使用带许可证的 `computer/vendor/cjson`。完整固件构建请按 `firmware/README.md`，它会解析 BSP、LVGL、ESP-SR/ESP-DL 等依赖，不将本机 `managed_components` 提交进仓库。
 
 `computer/build_home_assets.py` 只导出现有 palette/RGB565 素材，不重新生成角色。`firmware/tools/build_panel_resources.py` 会生成 panel C 表、资源清单和二进制；安装器在临时源码副本里运行它，避免改动 checkout。床遮挡数据由共享 `pet_home.h` 常量生成，睡姿使用独立遮挡层。
 
 发布前运行完整回归、检查许可证与私人数据。禁止提交运行时导出、个人语音、原始私有参考图、实际服务 CA/私钥、数据库或包含凭据的固件。公共历史应只包含经过审查的公开文件。
+
+部署配置统一由 `deployment_paths.py` 与 `runtime_config.py` 读取；改动路径/模型字段时需跑安装器、配置一致性和实际请求回归。未知配置必须拒绝，不能悄悄回到另一块磁盘或其他付费模型。

@@ -1,7 +1,7 @@
 """Deploy only an audited desktop-v1 source bundle, with exact-baseline rollback.
 
 No config, credentials, resources, desktop processes or database rollback writes.
-Run on the RK host: python3 release_runtime.py --release /mnt/nvme/.../release
+Run on the host: python3 release_runtime.py --release /YOUR_DATA/reviewed-release
 """
 from contextlib import closing
 import argparse
@@ -16,6 +16,7 @@ import sqlite3
 import ssl
 import subprocess
 import time
+from deployment_paths import data_root, install_dir, storage_ready, read_layout
 
 CONTRACT='desktop-v1'
 GATES=('active_unit','arm_unit','frontend','browser_guard','rollback')
@@ -40,7 +41,7 @@ def validate(release,install):
     files=manifest.get('files',{});baseline=manifest.get('baseline',{})
     if not files or not {'agent.py','brain.py','companion.py'}<=files.keys() or not files.keys()<=baseline.keys():raise ValueError('incomplete entrypoint baseline')
     for name,digest in files.items():
-        if Path(name).suffix not in ('.py','.js','.html','.css','.so','.c','.h') or name.startswith(('experimental/','vendor/')):raise ValueError('not a runtime update path')
+        if (Path(name).suffix not in ('.py','.js','.html','.css','.so','.c','.h') and name!='runtime.defaults.json') or name.startswith(('experimental/','vendor/')):raise ValueError('not a runtime update path')
         if sha(checked_path(release,name))!=digest:raise ValueError('staged source changed')
     for name,expected in baseline.items():
         p=checked_path(install,name)
@@ -73,7 +74,7 @@ def strict_health(base):
     context=ssl.create_default_context(cafile=str(base/'config/ca.pem'));results={}
     for purpose,payload,token in [('brain',row,values['DESKPET_BRAIN_TOKEN']),('computer',{},values['DESKPET_COMPUTER_TOKEN'])]:
         raw=json.dumps(payload).encode()
-        sock=socket.create_connection(('127.0.0.1',8791),timeout=8)
+        sock=socket.create_connection(('127.0.0.1',int(read_layout()['port'])),timeout=8)
         with context.wrap_socket(sock,server_hostname=origin.hostname) as stream:
             headers=('POST /v1/'+purpose+'/health HTTP/1.1\r\nHost: '+origin.netloc+'\r\nAuthorization: Bearer '+token+'\r\nContent-Type: application/json\r\nContent-Length: '+str(len(raw))+'\r\nConnection: close\r\n\r\n').encode()
             stream.sendall(headers+raw);response=http.client.HTTPResponse(stream);response.begin();value=json.loads(response.read(65536))
@@ -123,7 +124,7 @@ def activate(release,install,base,control=system,health=strict_health):
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--release',required=True,type=Path);args=parser.parse_args()
     os.umask(0o077)
-    if os.geteuid()!=0 or not os.path.ismount('/mnt/nvme'):raise SystemExit('requires authorized RK maintenance and NVMe mount')
-    print(json.dumps(activate(args.release,Path('/opt/deskpet-computer'),Path('/mnt/nvme/deskpet'))))
+    if os.geteuid()!=0 or not storage_ready():raise SystemExit('requires root maintenance and configured storage mount')
+    print(json.dumps(activate(args.release,install_dir(),data_root())))
 
 if __name__=='__main__':main()

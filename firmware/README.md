@@ -17,7 +17,7 @@ idf.py menuconfig
 - `DESKPET_COMPUTER_URL`：与你浏览器相同的 HTTPS origin，例如 `https://你的域名:8791`，无 `/home/` 路径。
 - `DESKPET_COMPUTER_TOKEN` 与 `DESKPET_BRAIN_TOKEN`：分别取主机私有 `service.env`、`brain.env`；不公开或混用。
 - `DESKPET_COMPUTER_CA_FILE`：复制本次主机的**公共 CA**到 `firmware/private/computer-ca.pem`，填写 `private/computer-ca.pem`。不得嵌入证书私钥。
-- Wi-Fi 可以留空，在屏幕完成配网。云模型 Key 留在主脑，远程模式不需要把它写入板子。
+- Wi-Fi 可以留空，在屏幕完成配网。云模型 Key 留在主脑，远程模式不需要把它写入板子。后端模型名、TTS/ASR 以 Linux 配置为准；独立模式可在 menuconfig 的 MINIMAX_MODEL、TTS_MODEL、ASR_MODEL 中修改，初始音色使用 DEFAULT_VOICE。
 
 远程模式默认启用房间同步和 panel cache。主脑安装器生成相同美术/字体资源，并经认证接口分块下发，板端有校验及 A/B 缓存。
 

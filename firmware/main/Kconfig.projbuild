@@ -54,6 +54,22 @@ config DESKPET_MINIMAX_HOST
     string "MiniMax 主机"
     default "https://api.minimaxi.com"
 
+config DESKPET_MINIMAX_MODEL
+    string "MiniMax dialogue model name (standalone mode)"
+    default "MiniMax-M3.1-Flash"
+
+config DESKPET_ASR_MODEL
+    string "MiniMax speech-to-text model (standalone mode)"
+    default "asr-1.0"
+
+config DESKPET_TTS_MODEL
+    string "MiniMax text-to-speech model (standalone mode)"
+    default "speech-2.8-turbo"
+
+config DESKPET_DEFAULT_VOICE
+    string "Initial voice ID (saved voice selection takes precedence)"
+    default "female-shaonv"
+
 config DESKPET_XFYUN_APP_ID
     string "讯飞新版声纹 APPID"
     default ""

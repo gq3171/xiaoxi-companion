@@ -3,12 +3,14 @@
 import json,os,socket,struct,time
 from urllib.request import build_opener,ProxyHandler
 from urllib.parse import urlsplit
+from runtime_config import settings, cdp_port, allowed_cdp_ports
 from pathlib import Path
+from deployment_paths import desktop_root
 
 def close_browser(port,root=None):
  # Browser.close performs a normal profile flush; SIGTERM alone marks it crashed.
  port=int(port)
- if port not in (19223,19224):raise ValueError('unexpected private browser port')
+ if port not in allowed_cdp_ports():raise ValueError('unexpected private browser port')
  opener=build_opener(ProxyHandler({}))
  with opener.open('http://127.0.0.1:'+str(port)+'/json/version',timeout=2) as response:info=json.loads(response.read(16384))
  url=info['webSocketDebuggerUrl'];parsed=urlsplit(url)
@@ -40,4 +42,4 @@ def stop(root,seconds=9):
  while path.exists():
   if time.monotonic()>=deadline:raise TimeoutError('desktop did not stop cleanly')
   time.sleep(.1)
-if __name__=='__main__':stop(Path(os.environ.get('DESKPET_DESKTOP_ROOT','/mnt/nvme/deskpet-desktop')))
+if __name__=='__main__':stop(desktop_root())

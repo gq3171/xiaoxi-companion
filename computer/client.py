@@ -11,6 +11,8 @@ import os
 from pathlib import Path
 import ssl
 import tempfile
+from runtime_config import public_origin
+from deployment_paths import data_root
 from urllib.parse import urlsplit
 from urllib.request import Request,build_opener,HTTPSHandler,ProxyHandler
 
@@ -18,9 +20,9 @@ from urllib.request import Request,build_opener,HTTPSHandler,ProxyHandler
 def main():
     root=Path(__file__).resolve().parents[1]
     parser=argparse.ArgumentParser()
-    parser.add_argument('--origin',default='https://xiaoxi.example:8791')
-    parser.add_argument('--config',type=Path,default=root/'firmware/private/computer.env')
-    parser.add_argument('--ca',type=Path,default=root/'firmware/private/computer-ca.pem')
+    parser.add_argument('--origin',default=public_origin())
+    parser.add_argument('--config',type=Path,default=data_root()/'config/service.env')
+    parser.add_argument('--ca',type=Path,default=data_root()/'config/ca.pem')
     parser.add_argument('--job');parser.add_argument('--artifact');parser.add_argument('--out',type=Path)
     args=parser.parse_args();origin=urlsplit(args.origin)
     if origin.scheme!='https' or not origin.hostname or origin.username or origin.password or origin.path not in ('','/') or origin.query or origin.fragment:

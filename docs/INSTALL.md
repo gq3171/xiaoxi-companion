@@ -1,40 +1,44 @@
-# 安装主脑
+# 安装
 
-详细执行合同见 [INSTALL_FOR_AGENTS.md](INSTALL_FOR_AGENTS.md)。可把该文件交给协助部署的大模型。
-
-## 准备 Linux
-
-使用 Debian/Ubuntu、Python 3.11+、systemd。RK3399 已验证；其他 ARM64/x86_64 的主脑路径可检查，桌面/音频硬件仍需适配。先自行将数据盘挂载到 `/mnt/nvme`，安装器不会处理磁盘分区。主脑安装要求至少 2 GiB 空间，桌面/浏览器/模型产物需要更多；建议至少 4 GiB RAM，具体并发量需实测。
+在 Debian/Ubuntu、Python 3.11+、systemd 的 Linux 主机上克隆仓库后：
 
 ```sh
-./install.sh --check --json
+sudo ./install.sh --setup
 ```
 
-在仓库外创建只有自己能读的 `provider.env`，填入自己的 MiniMax API Key；格式参照 `computer/env.example`，然后 `chmod 600 /private/provider.env`。不要使用个人 Wi-Fi 密码当 Token。
+向导只询问：
+
+1. **数据目录**：按你实际磁盘路径填写，例如 `/srv/ssd/xiaoxi`。没有独立数据盘也可以选择普通目录；不要求叫 NVMe 或挂载到指定位置。
+2. **访问地址**：域名或本机局域网 IP，用于网页、板子与 HTTPS 证书。
+3. **你实际开通的后端模型名称**：当前集成为 MiniMax，不用别人的账号型号作无条件默认。
+4. **该服务的 API Key**：隐藏输入，保存成权限 600 的私有配置，不放到聊天或公开日志。
+
+软件包安装、native 编译、房间素材生成、随机服务 Token、证书和 systemd 由安装器自动处理。默认 HTTPS 端口 8791，需修改时传 `--port`。首次使用约需 2 GiB 可用空间；完整桌面与媒体需更多。数据盘/目录需要支持 Unix 权限；不会分区、格式化或清空已有目录。
+
+## 自动部署
+
+给协助部署的大模型阅读 [INSTALL_FOR_AGENTS.md](INSTALL_FOR_AGENTS.md)。无交互例子：
 
 ```sh
-sudo ./install.sh --apply --hostname YOUR_ACTUAL_DNS_NAME --env-file /private/provider.env --json
+./install.sh --check --data-dir /srv/ssd/xiaoxi --json
+sudo ./install.sh --apply --data-dir /srv/ssd/xiaoxi --hostname YOUR_DNS_OR_LAN_IP --env-file /private/provider.env --json
 sudo ./install.sh --doctor --json
 ```
 
-退出码 2 说明服务已就绪、还需板端身份导入。退出码 1 则应先查看具体错误，别反复重装。脚本不验证套餐是否包含目标模型/语音能力，实际调用权限和计费以你的账号为准。
+`provider.env` 包含你填写的 `MINIMAX_MODEL`、`MINIMAX_API_KEY` 和可选 `MINIMAX_API_HOST`，权限 600，放仓库外。不要在命令参数中放 API Key。路径保存后，后续 `--doctor` 和同一版本重跑不需再输入路径或密钥。
 
-## HTTPS 与网页
+退出码 2 表示本地 HTTPS 主脑就绪、还需板端身份导入；不是要求重装。详情和高级可调项见 [配置清单](CONFIGURATION.md)。主脑检查不发付费模型请求，不能据此声称 API 套餐已验收。
 
-默认 HTTPS 端口 8791。为实际域名配置 DNS 和需要的路由器映射，仅暴露 HTTPS；SSH、VNC 与 CDP 不属于网页访问所需的公共端口。
+## 必要的人工步骤
 
-CA 公共证书位于 `/mnt/nvme/deskpet/config/ca.pem`。通过可信 SSH/SCP 取走该公共证书，核对指纹后在自己的 Windows/macOS 浏览器/系统信任库导入。**不要取走 `ca.key`、`server.key`。** 也可使用自己的公有证书替换服务证书并保留严格校验。服务器证书默认一年有效，要安排续签。
+- 在自己的浏览器/系统导入本次安装生成的 `数据目录/config/ca.pem` **公共 CA**（核对指纹），或使用自己的公有证书。不要复制 `ca.key`、`server.key`。服务器证书默认一年有效，需在到期前续签。
+- 确保选择的 IP/域名能从客户端访问；需要外网时自行配置 DNS/路由器。只开放 HTTPS，VNC/CDP 保持私有。
+- 按 [固件说明](../firmware/README.md) 核对板型/串口、配置主脑并完成身份创建；网页与板子共享同一只小溪，不能伪造身份导入跳过主人确认。
 
-打开 `https://你的实际域名:8791/home/`，在主机运行下面命令取得 3 分钟有效的一次性网页配对码：
+首次网页配对：在已安装的主机上运行 `sudo python3 软件目录/home_pair_admin.py`，取得一次性配对码。配对后可在网页生成独立持久 Token。
 
-```sh
-sudo python3 /opt/deskpet-computer/home_pair_admin.py
-```
+## 可选桌面和维护
 
-完成配对后，网页“设备授权”可以生成独立的持久网页 Token，妥善保存，以后新电脑也能登录。网页 Token 不等于服务间的 Computer/Brain Token。
+[真实桌面](DESKTOP.md) 的显卡驱动/依赖需按目标机器验收，不是所有 Linux 硬件都一样。路径和 unit 由同一安装配置生成，不再手改目录名。
 
-首次仍需 [ESP32 身份创建](../firmware/README.md)，网页不单独新建另一只小溪。
-
-## 卸载与升级
-
-`sudo systemctl disable --now deskpet-computer.service` 可以停用主脑。不要自动删除 NVMe 数据或用户账户；记忆和任务产物可能是用户需要保留的内容。本安装器只接受初次安装或相同版本重跑，版本升级见 `computer/release_runtime.py`。任何操作前先备份配置和 SQLite 的一致快照，不拷贝正在写入的单个数据库文件冒充完整备份。
+同一版本安装器可幂等重跑；版本升级使用 `computer/release_runtime.py` 的精确基线/备份/健康检查流程。不能删除配置或把旧数据库覆盖新记忆来“重新安装”。停用主脑使用 `sudo systemctl disable --now deskpet-computer.service`，不自动删除数据。

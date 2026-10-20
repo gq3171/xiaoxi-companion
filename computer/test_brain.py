@@ -205,7 +205,7 @@ class BrainTests(unittest.TestCase):
             with self.assertRaises(HTTPError) as wrong_body:
                 rpc('/v1/brain/health', self.env | {'device': 'ffeeddccbbaa'})
             self.assertEqual(wrong_body.exception.code, 409); wrong_body.exception.close()
-            result = json.loads(rpc('/v1/brain/asr', b'prefix RIFF simulated PCM only',
+            result = json.loads(rpc('/v1/brain/asr', b'------deskpet\r\nContent-Disposition: form-data; name="model"\r\n\r\nasr-1.0\r\n------deskpet\r\nRIFF simulated PCM only',
                                     content_type='multipart/form-data; boundary=----deskpet',
                                     **{'X-Pet-Session': json.dumps(self.env)}))
             self.assertEqual(result['text'], '模拟转写')

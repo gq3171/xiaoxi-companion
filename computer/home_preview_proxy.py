@@ -7,10 +7,12 @@ from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
 
-ORIGIN=os.environ.get('DESKPET_PUBLIC_ORIGIN','https://xiaoxi.example:8791').rstrip('/')
+from runtime_config import public_origin, settings
+ORIGIN=public_origin()
 HOST=urlsplit(ORIGIN).hostname;PORT=urlsplit(ORIGIN).port or 443
 
-def handler(context,port=18791):
+def handler(context,port=None):
+ port=port or settings()['web']['preview_port']
  class Proxy(BaseHTTPRequestHandler):
     protocol_version='HTTP/1.1'
     def log_message(self,*_):pass
@@ -63,8 +65,8 @@ def handler(context,port=18791):
  return Proxy
 
 def main():
-    parser=argparse.ArgumentParser();parser.add_argument('--ca',type=Path,default=Path(__file__).resolve().parents[1]/'firmware/private/computer-ca.pem');args=parser.parse_args()
-    context=ssl.create_default_context(cafile=str(args.ca));server=ThreadingHTTPServer(('127.0.0.1',18791),handler(context));server.daemon_threads=True
-    print('Loopback home preview http://localhost:18791/home/; upstream CA validation enabled.',flush=True);server.serve_forever()
+    parser=argparse.ArgumentParser();parser.add_argument('--ca',type=Path,required=True);args=parser.parse_args()
+    context=ssl.create_default_context(cafile=str(args.ca));server=ThreadingHTTPServer(('127.0.0.1',settings()['web']['preview_port']),handler(context));server.daemon_threads=True
+    print('Loopback home preview ready; upstream CA validation enabled.',flush=True);server.serve_forever()
 
 if __name__=='__main__':main()

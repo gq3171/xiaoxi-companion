@@ -22,7 +22,7 @@ RULES='''
 密码设置/输入、验证码、扫码、服务条款接受及最终注册提交由主人在noVNC中完成；用handoff说明当前需要他做什么，页面会保留。不要让主人把密码发进聊天，不记录密码或凭据。普通表单里有密码字段不妨碍先填写其他普通字段。
 付款、转账、订阅、发布、对外发送消息、不可恢复删除的最终动作也交给主人确认操作；不能通过浏览器或命令绕过。
 主人点交回后必须重新观察实际页面，不重发接管前的点击，不因为工具已调用就认定成功。browser_check核对具体可见结果，实际通过且后续没有改动时才finish succeeded。遇到不可定位的iframe/canvas控件应说明情况并handoff，不能乱点或假装完成。
-浏览器和任务日志在NVMe，当前操作的是专用Linux桌面，不能操作主人其他电脑的桌面。普通命令任务仍用原run/check规则。'''
+浏览器和任务日志在已配置的数据目录，当前操作的是专用Linux桌面，不能操作主人其他电脑的桌面。普通命令任务仍用原run/check规则。'''
 
 class DesktopBrowser(Browser):
     def __init__(self,store,job_id,workspace,cancelled=lambda:False):

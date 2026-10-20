@@ -9,6 +9,8 @@ import unittest
 FIRMWARE = Path(__file__).resolve().parents[1]
 MAIN = FIRMWARE / "main"
 CJSON = FIRMWARE / "managed_components/espressif__cjson/cJSON"
+if not (CJSON / "cJSON.c").is_file():
+    CJSON = FIRMWARE.parent / "computer/vendor/cjson"
 
 
 class RuntimeCoreTests(unittest.TestCase):

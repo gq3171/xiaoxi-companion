@@ -3,6 +3,7 @@
 Browser recordings exist only in request memory. No provider or body credential is
 sent to the browser. Durable turn IDs prevent retrying actions after a reconnect.
 """
+from runtime_config import settings
 import copy,hashlib,io,json,re,secrets,sqlite3,threading,time,wave
 from pathlib import Path
 
@@ -189,7 +190,7 @@ class HomeChat:
                 if len(pcm)!=audio.getnframes()*2:raise ValueError('truncated recording')
             clean=io.BytesIO()
             with wave.open(clean,'wb') as out:out.setnchannels(1);out.setsampwidth(2);out.setframerate(16000);out.writeframes(pcm)
-            body=b'------deskpet\r\nContent-Disposition: form-data; name="model"\r\n\r\nasr-1.0\r\n------deskpet\r\nContent-Disposition: form-data; name="file"; filename="speech.wav"\r\nContent-Type: audio/wav\r\n\r\n'+clean.getvalue()+b'\r\n------deskpet--\r\n'
+            body=b'------deskpet\r\nContent-Disposition: form-data; name="model"\r\n\r\n'+settings()['speech']['asr_model'].encode()+b'\r\n------deskpet\r\nContent-Disposition: form-data; name="file"; filename="speech.wav"\r\nContent-Type: audio/wav\r\n\r\n'+clean.getvalue()+b'\r\n------deskpet--\r\n'
             if not self.authorized(session):raise PermissionError('expired')
             with self.brain.provider.request('/v1/speech_to_text',body,'multipart/form-data; boundary=----deskpet',True) as response:raw=response.read(32769)
             if len(raw)>32768 or not self.authorized(session):raise ValueError('expired transcription')
@@ -221,7 +222,7 @@ class HomeChat:
         finally:self.audio_lock.release()
     def synthesize(self,session,say):
         self.voice_budget(session,'tts')
-        speech=dict(model='speech-2.8-turbo',text=say,stream=False,voice_setting=dict(voice_id='female-shaonv',speed=1,vol=1,pitch=0),audio_setting=dict(sample_rate=16000,format='pcm',channel=1))
+        speech=dict(model=settings()['speech']['tts_model'],text=say,stream=False,voice_setting=dict(voice_id=settings()['speech']['default_voice'],speed=1,vol=1,pitch=0),audio_setting=dict(sample_rate=16000,format='pcm',channel=1))
         if not self.authorized(session):raise PermissionError('expired')
         with self.brain.provider.request('/v1/t2a_v2',encode(speech).encode()) as response:raw=response.read(8*1024*1024+1)
         if len(raw)>8*1024*1024 or not self.authorized(session):raise ValueError('audio budget')

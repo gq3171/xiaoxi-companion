@@ -19,6 +19,7 @@ import sqlite3
 import threading
 import time
 import zlib
+from runtime_config import settings, DEFAULTS, rewrite_asr_model, voice_valid
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 from runtime_support import Diagnostics, InferenceLanes, Deferred, phase
@@ -368,10 +369,14 @@ thread_reviews可引用实际open_threads的id和后来主人明确确认/取消
 SYSTEM += BRAIN_RULE+self_model.RULES+DIALOGUE_STYLE+INTERACTION_RULES
 
 class Provider:
-    def __init__(self, key, host='https://api.minimaxi.com'):
+    def __init__(self, key, host=None, model=None):
+        host=host or settings()['llm']['api_host']
         if host.rstrip('/') not in ('https://api.minimaxi.com', 'https://api.minimax.io', 'https://api.minimax.cn'):
             raise ValueError('unsupported fixed provider origin')
         self.key, self.host = key, host.rstrip('/')
+        self.model = model or os.environ.get('MINIMAX_MODEL', settings()['llm']['model'])
+        if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._:/-]{0,159}', self.model):
+            raise ValueError('invalid configured model name')
 
     def request(self, path, body, content_type='application/json', language=False):
         headers = {'Content-Type': content_type, 'Authorization': 'Bearer ' + self.key}
@@ -380,13 +385,14 @@ class Provider:
         if language:
             headers['language'] = 'zh'
         phase('provider_request')
-        response=urlopen(Request(self.host + path, body, headers), timeout=30)
+        response=urlopen(Request(self.host + path, body, headers), timeout=settings()['llm']['timeout_seconds'])
         phase('provider_headers')
         return response
 
     def complete(self, system, messages, reflection=False, live=None):
-        payload = {'model': 'MiniMax-M3.1-Flash', 'max_tokens': 8192 if reflection else 4096,
-                   'temperature': 1, 'output_config': {'effort': 'high' if reflection else 'low'},
+        config=settings()['llm']
+        payload = {'model': self.model, 'max_tokens': config['reflection_max_tokens'] if reflection else config['dialogue_max_tokens'],
+                   'temperature': config['temperature'], 'output_config': {'effort': config['reflection_effort'] if reflection else config['dialogue_effort']},
                    'system': system, 'messages': messages, 'stream': True}
         text, total, done, limited = [], 0, False, False
         with self.request('/anthropic/v1/messages', encode(payload)) as response:
@@ -613,6 +619,7 @@ class Brain:
                 content_type = handler.headers.get('Content-Type', '')
                 if content_type != 'multipart/form-data; boundary=----deskpet' or b'RIFF' not in body[:512]:
                     raise ValueError('invalid audio form')
+                body=rewrite_asr_model(body)
                 with self.diagnostics.trace(envelope,'asr'):
                     phase('audio_upload_received',bytes=len(body))
                     with self.provider.request('/v1/speech_to_text', body, content_type, True) as response:
@@ -673,10 +680,11 @@ class Brain:
         speech = request.get('speech')
         if not isinstance(speech, dict) or not isinstance(speech.get('text'), str) or not 0 < len(speech['text'].encode()) <= 4096:
             raise ValueError('invalid speech text')
-        if speech.get('model') != 'speech-2.8-turbo' or speech.get('audio_setting') != {'sample_rate': 16000, 'format': 'pcm', 'channel': 1}:
+        if speech.get('model') not in (settings()['speech']['tts_model'],DEFAULTS['speech']['tts_model']) or speech.get('audio_setting') != {'sample_rate': 16000, 'format': 'pcm', 'channel': 1}:
             raise ValueError('invalid fixed audio format')
+        speech=dict(speech,model=settings()['speech']['tts_model'])
         voice = speech.get('voice_setting', {}).get('voice_id', '')
-        if not isinstance(voice, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,100}', voice):
+        if not voice_valid(voice):
             raise ValueError('invalid voice ID')
         if speech.get('stream') is True:
             with self.provider.request('/v1/t2a_v2', encode(speech)) as upstream:

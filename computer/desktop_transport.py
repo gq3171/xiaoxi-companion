@@ -2,7 +2,8 @@
 import base64,select,socket,ssl,time,os
 from urllib.parse import urlsplit
 
-ORIGIN=os.environ.get('DESKPET_PUBLIC_ORIGIN','https://xiaoxi.example:8791').rstrip('/')
+from runtime_config import public_origin, settings
+ORIGIN=public_origin()
 def upgrade_headers(headers):
     try:key=base64.b64decode(headers.get('Sec-WebSocket-Key',''),validate=True)
     except (ValueError,TypeError):raise ValueError('invalid websocket key') from None

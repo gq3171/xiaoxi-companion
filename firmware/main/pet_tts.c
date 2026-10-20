@@ -1,4 +1,8 @@
 #include "pet_tts.h"
+#ifdef ESP_PLATFORM
+#include "sdkconfig.h"
+#endif
+#include "pet_model_config.h"
 #include "pet_util.h"
 #include "cJSON.h"
 #include <string.h>
@@ -68,7 +72,8 @@ static void apply(int index,int16_t *pcm,size_t samples)
 }
 void pet_tts_start(void)
 {
-    apply(4,NULL,0);
+    int initial=pet_tts_find(CONFIG_DESKPET_DEFAULT_VOICE);
+    apply(initial>=0?initial:4,NULL,0);
     char *raw=pet_snapshot_load(VOICE_BASE,VOICE_LIMIT,&s_sequence);
     cJSON *root=raw?cJSON_Parse(raw):NULL;free(raw);
     cJSON *id=cJSON_GetObjectItemCaseSensitive(root,"voice"),*audio=cJSON_GetObjectItemCaseSensitive(root,"pcm");

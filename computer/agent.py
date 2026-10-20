@@ -13,6 +13,8 @@ import os
 from pathlib import Path
 import re
 from conversation_style import TASK_STYLE
+from runtime_config import settings
+from deployment_paths import read_layout, data_root
 from result_delivery import spoken_result
 from panel_resources import resource_rpc
 from home_sync import dispatch as home_dispatch, close_store as home_close
@@ -205,7 +207,7 @@ class Worker:
         self.store = store
         self.stop = threading.Event()
         self.key = os.environ.get("MINIMAX_API_KEY", "")
-        self.host = os.environ.get("MINIMAX_API_HOST", "https://api.minimaxi.com").rstrip("/")
+        self.host = os.environ.get("MINIMAX_API_HOST", settings()["llm"]["api_host"]).rstrip("/")
         if not self.host.startswith("https://"):
             raise ValueError("MiniMax地址必须是HTTPS")
         self.model = model or self.complete
@@ -416,8 +418,8 @@ def handler(store: Store, token: str, ready, brain=None):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=8791)
-    parser.add_argument("--data", type=Path, default=Path.home() / ".local/share/deskpet-computer/jobs.sqlite3")
+    parser.add_argument("--port", type=int, default=read_layout()["port"])
+    parser.add_argument("--data", type=Path, default=data_root()/"state/jobs.sqlite3")
     parser.add_argument("--tls-cert", type=Path)
     parser.add_argument("--tls-key", type=Path)
     args = parser.parse_args()

@@ -4,9 +4,11 @@ import html,json,os,signal,socket,struct,subprocess,threading,time
 from desktop_shell import prepare as prepare_shell
 from desktop_stop import close_browser
 from desktop_launcher import browser_args,browser_running
+from runtime_config import settings, cdp_port, allowed_cdp_ports
 from pathlib import Path
 
-ROOT=Path(os.environ.get('DESKPET_DESKTOP_ROOT','/mnt/nvme/deskpet-desktop'))
+from deployment_paths import desktop_root, storage_ready
+ROOT=desktop_root()
 FRAME_LIMIT=768*1024
 class Desktop:
  def __init__(self,root=ROOT,clock=time.monotonic):
@@ -56,10 +58,10 @@ class Desktop:
   finally:conn.close()
 
 def main():
- if os.geteuid()==0 or not os.path.ismount('/mnt/nvme'):raise SystemExit('unprivileged user and NVMe required')
+ if os.geteuid()==0 or not storage_ready():raise SystemExit('unprivileged user and configured storage mount required')
  os.umask(0o077)
  for name in ('runtime','cache','profile','tmp','config','downloads'):(ROOT/name).mkdir(mode=0o700,exist_ok=True)
- env=os.environ.copy();env.update(HOME=str(ROOT),XDG_RUNTIME_DIR=str(ROOT/'runtime'),XDG_CACHE_HOME=str(ROOT/'cache'),TMPDIR=str(ROOT/'tmp'),WAYLAND_DISPLAY='wayland-0',WLR_BACKENDS='headless',WLR_HEADLESS_OUTPUTS='1',WLR_RENDERER='gles2',WLR_RENDER_DRM_DEVICE='/dev/dri/renderD128',LIBSEAT_BACKEND='noop')
+ env=os.environ.copy();env.update(HOME=str(ROOT),XDG_RUNTIME_DIR=str(ROOT/'runtime'),XDG_CACHE_HOME=str(ROOT/'cache'),TMPDIR=str(ROOT/'tmp'),WAYLAND_DISPLAY='wayland-0',WLR_BACKENDS='headless',WLR_HEADLESS_OUTPUTS='1',WLR_RENDERER=settings()['desktop']['renderer'],WLR_RENDER_DRM_DEVICE=settings()['desktop']['drm_device'],LIBSEAT_BACKEND='noop')
  env.update(XDG_CONFIG_HOME=str(ROOT/'config'),XDG_DATA_HOME=str(ROOT/'data'),XDG_STATE_HOME=str(ROOT/'state'),LANG='C.UTF-8',XDG_CURRENT_DESKTOP='labwc',FONTCONFIG_FILE='/etc/fonts/fonts.conf')
  os.environ.update(env);dock_config,dock_style=prepare_shell(ROOT);desktop=Desktop();desktop.write_dashboard();processes=[];critical=[];chrome=None
  def stop(*_):desktop.stop.set()
@@ -72,7 +74,7 @@ def main():
    if desktop.stop.wait(.1):return
   for name,readonly in [('view',True),('control',False)]:
    path=ROOT/'runtime'/('rfb-'+name+'.sock');path.unlink(missing_ok=True)
-   args=['/usr/local/libexec/deskpet-wayvnc-headless','--unix-socket','--disable-resizing','--max-fps=15','--log-level=warning','--socket='+str(ROOT/'runtime'/('wayvnc-'+name+'.ctl'))]
+   args=['/usr/local/libexec/deskpet-wayvnc-headless','--unix-socket','--disable-resizing','--max-fps='+str(settings()['desktop']['max_fps']),'--log-level=warning','--socket='+str(ROOT/'runtime'/('wayvnc-'+name+'.ctl'))]
    if readonly:args.append('--disable-input')
    args.append(str(path));processes.append(subprocess.Popen(args,env=env,start_new_session=True))
    ws=ROOT/'runtime'/('vnc-'+name+'.sock');ws.unlink(missing_ok=True)
@@ -87,7 +89,7 @@ def main():
   dock_args=['/usr/bin/waybar','--config',str(dock_config),'--style',str(dock_style)]
   panel=subprocess.Popen(dock_args,env=env,start_new_session=True);processes.append(panel);panel_retry=0.;panel_restarts=0
   critical=list(processes[:-2])
-  port=os.environ.get('DESKPET_DESKTOP_CDP_PORT','19223')
+  port=str(cdp_port())
   chrome=subprocess.Popen(browser_args(ROOT,(ROOT/'desk.html').as_uri(),port),env=env,start_new_session=True);processes.append(chrome)
   socket_path=ROOT/'runtime/view.sock';socket_path.unlink(missing_ok=True)
   with socket.socket(socket.AF_UNIX,socket.SOCK_STREAM) as listener:
@@ -109,7 +111,7 @@ def main():
  finally:
   desktop.stop.set()
   try:
-   close_browser(os.environ.get('DESKPET_DESKTOP_CDP_PORT','19223'),ROOT)
+   close_browser(str(cdp_port()),ROOT)
    if chrome is not None and chrome.poll() is None:chrome.wait(timeout=4)
   except Exception:pass
   for p in reversed(processes):

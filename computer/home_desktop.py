@@ -2,7 +2,8 @@
 import json,os,socket,struct,subprocess,threading,time
 from pathlib import Path
 
-SOCKET=Path('/mnt/nvme/deskpet-desktop/runtime/view.sock')
+from deployment_paths import desktop_root
+SOCKET=desktop_root()/'runtime/view.sock'
 MAX_FRAME=768*1024
 class DesktopUnavailable(Exception):pass
 

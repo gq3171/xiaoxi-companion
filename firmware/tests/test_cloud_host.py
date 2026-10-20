@@ -134,6 +134,19 @@ int esp_http_client_cleanup(void *c) { cleaned++; return 0; }
 
 
 class CloudHostTests(unittest.TestCase):
+    def test_configured_model_names_reach_actual_requests(self):
+        self.run_fixture(r'''
+int main(void){
+ response="{\"content\":[{\"type\":\"text\",\"text\":\"{}\"}]}";
+ char *out=pet_cloud_minimax("system","hello",true);assert(out);free(out);
+ assert(strstr(request,"chosen-dialogue-model"));
+ int16_t pcm[512]={0};char text[128];response="{\"text\":\"hello\"}";
+ assert(pet_cloud_transcribe(pcm,512,text,sizeof(text))==0);
+ assert(strstr(request,"chosen-asr-model"));
+ free(request);return 0;
+}
+''', extra_config='#define CONFIG_DESKPET_MINIMAX_MODEL "chosen-dialogue-model"\n#define CONFIG_DESKPET_ASR_MODEL "chosen-asr-model"\n')
+
     def test_asr_uses_documented_chinese_header_without_leaking_it_into_other_calls(self):
         self.run_fixture(r'''
 int main(void){
@@ -146,13 +159,14 @@ int main(void){
 }
 ''')
 
-    def run_fixture(self, body, search=False, computer=False):
+    def run_fixture(self, body, search=False, computer=False, extra_config=''):
         headers = {"http_test_sdk.h": HTTP_SDK,
                    "sdkconfig.h": '#define CONFIG_DESKPET_MINIMAX_HOST "https://api.minimaxi.com"\n'}
         if computer:
             headers["sdkconfig.h"] += '#define CONFIG_DESKPET_COMPUTER_URL "https://computer.example"\n#define CONFIG_DESKPET_COMPUTER_TOKEN "01234567890123456789012345678901"\n'
         if search:
             headers["sdkconfig.h"] += '#define CONFIG_DESKPET_MINIMAX_SEARCH 1\n'
+        headers["sdkconfig.h"] += extra_config
         for name in ["esp_crt_bundle.h", "esp_http_client.h", "esp_log.h", "esp_timer.h", "esp_tls.h", "freertos/FreeRTOS.h", "freertos/task.h"]:
             headers[name] = '#include "http_test_sdk.h"\n'
         test_runtime_core.RuntimeCoreTests.run_c(self, FIXTURE + body, ["pet_cloud", "pet_tts", "pet_search", "pet_util", "pet_turn", "pet_stream", "pet_latency"], headers)

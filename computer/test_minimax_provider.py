@@ -24,3 +24,19 @@ class MiniMaxProviderTests(unittest.TestCase):
  def test_missing_stream_termination_is_not_treated_as_complete_answer(self):
   p,_=self.provider(done=False)
   with self.assertRaisesRegex(ValueError,'incomplete'):p.complete('s',[])
+
+class ConfiguredModelTests(unittest.TestCase):
+ def test_configured_model_is_used_in_dialogue_and_reflection_requests(self):
+  from unittest.mock import patch
+  with patch.dict('os.environ',{'MINIMAX_MODEL':'configured-model-fixture'}):
+   p=brain.Provider('test-key');seen=[]
+  def request(path,body):
+   seen.append(json.loads(body));return io.BytesIO(b'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"ok"}}\n\ndata: {"type":"message_stop"}\n\n')
+  p.request=request
+  p.complete('system',[]);p.complete('system',[],reflection=True)
+  self.assertEqual([x['model'] for x in seen],['configured-model-fixture']*2)
+ def test_explicit_model_beats_environment_and_invalid_names_fail_before_network(self):
+  from unittest.mock import patch
+  with patch.dict('os.environ',{'MINIMAX_MODEL':'environment-fixture'}):
+   self.assertEqual(brain.Provider('test-key',model='explicit-fixture').model,'explicit-fixture')
+   with self.assertRaises(ValueError):brain.Provider('test-key',model='bad\nmodel')

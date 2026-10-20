@@ -9,6 +9,7 @@ import hashlib
 import json
 import math
 import os
+from runtime_config import settings, cdp_port, allowed_cdp_ports
 from pathlib import Path
 import subprocess
 import time
@@ -16,8 +17,9 @@ from urllib.parse import urlsplit
 from urllib.request import Request, build_opener, ProxyHandler
 from execution import Identity, write_artifact
 
-ENDPOINT='http://127.0.0.1:19223'
-BROWSER_HOME=Path('/mnt/nvme/deskpet-browser')
+ENDPOINT='http://127.0.0.1:'+str(cdp_port())
+from deployment_paths import browser_root, storage_ready
+BROWSER_HOME=browser_root()
 
 
 class BrowserUnavailable(RuntimeError): pass
@@ -31,7 +33,7 @@ class CDP:
     def __init__(self, url, cancelled=lambda:False):
         import websocket
         parsed=urlsplit(url)
-        if parsed.scheme!='ws' or parsed.hostname!='127.0.0.1' or parsed.port!=19223:
+        if parsed.scheme!='ws' or parsed.hostname!='127.0.0.1' or parsed.port!=cdp_port():
             raise ValueError('unexpected local debugger endpoint')
         self.ws=websocket.create_connection(url,timeout=.5,suppress_origin=True,skip_utf8_validation=True,
                                             http_proxy_host=None,http_no_proxy=['127.0.0.1'])
@@ -83,7 +85,7 @@ class Browser:
     def ensure(self):
         if self.ready:
             self.heartbeat();return
-        if not os.path.ismount('/mnt/nvme'):raise BrowserUnavailable('NVMe未挂载，浏览器未启动')
+        if not storage_ready():raise BrowserUnavailable('配置的数据盘未挂载，浏览器未启动')
         subprocess.run(['systemctl','start','deskpet-browser.service'],check=True,timeout=8,
                        stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
         deadline=time.monotonic()+20

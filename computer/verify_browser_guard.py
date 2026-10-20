@@ -2,6 +2,7 @@
 import json
 import os
 from pathlib import Path
+from deployment_paths import desktop_root
 import pwd
 import subprocess
 import tempfile
@@ -16,7 +17,7 @@ import desktop_browser
 def main():
     import websocket
     account=pwd.getpwnam('deskpet-desktop')
-    with tempfile.TemporaryDirectory(prefix='guard-proof-',dir='/mnt/nvme/deskpet-desktop') as tmp:
+    with tempfile.TemporaryDirectory(prefix='guard-proof-',dir=desktop_root()) as tmp:
         root=Path(tmp);os.chown(root,account.pw_uid,account.pw_gid);root.chmod(0o700)
         pages={
             '/register.html':'<h1>注册演示</h1><form><input aria-label="昵称"><a href="#" onclick="window.submissions++">继续</a></form>',

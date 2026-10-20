@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
-"""Reproducible local WayVNC virtual-output fix; build/cache on NVMe."""
+"""Reproducible WayVNC virtual-output fix; build/cache on configured storage."""
 import argparse,hashlib,json,os,subprocess,tarfile,urllib.request
 from pathlib import Path
+from deployment_paths import data_root, storage_ready
 
 URL='https://codeload.github.com/any1/wayvnc/tar.gz/refs/tags/v0.9.1'
 SHA256='aaaca02d36e54ec6ecf457dc266251946d895ac91521fbabb3470c3c09b3753c'
 
 def main():
  parser=argparse.ArgumentParser(description=__doc__)
- parser.add_argument('--build-dir',type=Path,default=Path('/mnt/nvme/deskpet/data/build/wayvnc-headless-rebuild'))
+ parser.add_argument('--build-dir',type=Path,default=data_root()/'data/build/wayvnc-headless-rebuild')
  parser.add_argument('--install',action='store_true',help='install tested binary in /usr/local/libexec (does not restart services)')
  args=parser.parse_args();root=args.build_dir.resolve()
- if not os.path.ismount('/mnt/nvme') or not root.is_relative_to(Path('/mnt/nvme')):raise SystemExit('Build directory must be on mounted NVMe')
+ if not storage_ready() or not root.is_relative_to(data_root()):raise SystemExit('Build directory must be under the configured data root on its mounted filesystem')
  root.mkdir(parents=True,exist_ok=True);archive=root/'source.tar.gz'
  if not archive.exists():
   with urllib.request.urlopen(URL,timeout=30) as response:archive.write_bytes(response.read(8*1024*1024))

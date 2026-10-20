@@ -1,6 +1,7 @@
 """Bound the complete connection lifetime and independent authenticated RPC lanes."""
 from contextlib import contextmanager
 from functools import wraps
+from runtime_config import settings
 import hmac
 import ssl
 import threading
@@ -37,13 +38,13 @@ def bounded_request(method):
 
 class ThreadedTLSServer(ThreadingHTTPServer):
     request_queue_size = 32
-    handshake_timeout = 4
-    connection_limit = 64
-    lane_limits = {'rpc': 16, 'web': 20, 'events': 20, 'desktop': 8}
+    handshake_timeout = settings()['http']['handshake_timeout']
+    connection_limit = settings()['http']['connection_limit']
+    lane_limits = settings()['http']['lane_limits']
 
     def __init__(self, *args, **kwargs):
         self.tls_context = None
-        self._handshakes = threading.BoundedSemaphore(8)
+        self._handshakes = threading.BoundedSemaphore(settings()['http']['handshake_limit'])
         self._connections = threading.BoundedSemaphore(self.connection_limit)
         self._lanes = {name: threading.BoundedSemaphore(count) for name, count in self.lane_limits.items()}
         super().__init__(*args, **kwargs)

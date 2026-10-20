@@ -5,6 +5,7 @@
 #include <errno.h>
 #include <stdatomic.h>
 #include "sdkconfig.h"
+#include "pet_model_config.h"
 #include "esp_crt_bundle.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
@@ -418,7 +419,7 @@ char *pet_cloud_dialogue(const char *system_prompt, const cJSON *history)
     pet_latency_mark(s_request_generation,PET_TIME_LLM_END);return out;
 #endif
     cJSON *request = cJSON_CreateObject();
-    cJSON_AddStringToObject(request, "model", "MiniMax-M3.1-Flash");
+    cJSON_AddStringToObject(request, "model", CONFIG_DESKPET_MINIMAX_MODEL);
     cJSON_AddNumberToObject(request, "max_tokens", 4096);
     cJSON_AddNumberToObject(request, "temperature", 1);
     cJSON_AddBoolToObject(request, "stream", true);
@@ -451,7 +452,7 @@ char *pet_cloud_minimax(const char *system_prompt, const char *request_text, boo
     return remote_model(reflection?"reflection":"plan",system_prompt,request_text);
 #endif
     cJSON *request = cJSON_CreateObject();
-    cJSON_AddStringToObject(request, "model", "MiniMax-M3.1-Flash");
+    cJSON_AddStringToObject(request, "model", CONFIG_DESKPET_MINIMAX_MODEL);
     cJSON_AddNumberToObject(request, "max_tokens", 8192);
     cJSON_AddNumberToObject(request, "temperature", reflection ? 0 : 1);
     cJSON_AddStringToObject(request, "system", system_prompt);
@@ -509,7 +510,7 @@ int pet_cloud_transcribe(const int16_t *mono, int samples, char *text, int capac
 {
     if (capacity > 0) text[0] = 0;
     if (samples <= 0 || capacity < 2) return -1;
-    const char *head = "------deskpet\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\nasr-1.0\r\n"
+    const char *head = "------deskpet\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\n" CONFIG_DESKPET_ASR_MODEL "\r\n"
                        "------deskpet\r\nContent-Disposition: form-data; name=\"file\"; filename=\"speech.wav\"\r\nContent-Type: audio/wav\r\n\r\n";
     const char *tail = "\r\n------deskpet--\r\n";
     size_t h = strlen(head), t = strlen(tail), wav = 44 + samples * 2, length = h + wav + t;
@@ -623,7 +624,7 @@ static bool stream_event(const char *bytes,size_t length,void *user)
 static cJSON *speech_request(const char *text,bool stream,const char *voice_id)
 {
     cJSON *request=cJSON_CreateObject();
-    cJSON_AddStringToObject(request,"model","speech-2.8-turbo");
+    cJSON_AddStringToObject(request,"model",CONFIG_DESKPET_TTS_MODEL);
     cJSON_AddStringToObject(request,"text",text);cJSON_AddBoolToObject(request,"stream",stream);
     cJSON_AddStringToObject(request,"output_format","hex");
     if(stream)cJSON_AddBoolToObject(cJSON_AddObjectToObject(request,"stream_options"),"exclude_aggregated_audio",true);
