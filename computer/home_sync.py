@@ -317,6 +317,23 @@ class HomeHTTP:
                 token=self.world.login(request.get('code'),request.get('token'),source=h.client_address[0]);self.respond(h,200,dict(ok=True),{'Set-Cookie':'xiaoxi_home='+token+'; Path=/home/; HttpOnly; Secure; SameSite=Strict; Max-Age=7776000'});return
             session=self.world.session(h)
             if not session:self.respond(h,401,dict(ok=False));return
+            if h.path.startswith('/home/api/private-input/'):
+                from private_input import inputs,InputConflict,submit_web
+                private=inputs(self.world.desktop.store);action=h.path.rsplit('/',1)[1]
+                try:
+                    if action=='claim':value=dict(ok=True,request=private.claim(request.get('id'),session))
+                    elif action=='cancel':value=private.cancel(request.get('id'),session)
+                    elif action=='release':value=private.release(request.get('id'),session,request.get('lease'))
+                    elif action=='submit':
+                        values=request.pop('values',{})
+                        def valid():
+                            with self.world.lock:return not self.world.stop.is_set() and self.world.sessions.get(session,0)>self.world.clock()
+                        try:value=submit_web(self.world.desktop.store,request.get('id'),session,request.get('lease'),values,request.get('activate'),valid)
+                        finally:values.clear()
+                    else:raise ValueError('unknown private input action')
+                    self.respond(h,200,value)
+                except InputConflict:self.respond(h,409,dict(ok=False,error='private_input_changed'))
+                return
             if h.path.startswith('/home/api/desktop/control/'):
                 from desktop_jobs import broker
                 controls=broker(self.world.desktop.store);action=h.path.rsplit('/',1)[1]
@@ -381,7 +398,7 @@ class HomeHTTP:
             else:self.respond(h,502,dict(ok=False,error='chat_unavailable'))
     def get(self,h):
         path=urlsplit(h.path).path
-        public={'/home/':('index.html','text/html; charset=utf-8'),'/home/app.js':('app.js','text/javascript; charset=utf-8'),'/home/style.css':('style.css','text/css; charset=utf-8'),'/home/recorder.js':('recorder.js','text/javascript; charset=utf-8')}
+        public={'/home/':('index.html','text/html; charset=utf-8'),'/home/app.js':('app.js','text/javascript; charset=utf-8'),'/home/style.css':('style.css','text/css; charset=utf-8'),'/home/recorder.js':('recorder.js','text/javascript; charset=utf-8'),'/home/private-input.js':('private-input.js','text/javascript; charset=utf-8')}
         if path in public:
             file,kind=public[path];self.bytes(h,200,(Path(__file__).parent/'home_web'/file).read_bytes(),kind);return
         session=self.world.session(h)
@@ -391,6 +408,10 @@ class HomeHTTP:
             name=path.removeprefix('/home/novnc/');root=Path(__file__).parent/'vendor/novnc';file=root/name
             if not re.fullmatch(r'(core|vendor)/[A-Za-z0-9_./-]+\.js',name) or any(p in ('','..','.') for p in name.split('/')) or not file.resolve().is_relative_to(root.resolve()) or not file.is_file():self.respond(h,404,dict(ok=False));return
             self.bytes(h,200,file.read_bytes(),'text/javascript; charset=utf-8');return
+        if path=='/home/api/private-input':
+            from private_input import inputs,prepare_waiting_request
+            prepare_waiting_request(self.world.desktop.store)
+            self.respond(h,200,dict(ok=True,request=inputs(self.world.desktop.store).pending(session)));return
         if path=='/home/api/desktop/session':
             from desktop_jobs import broker
             value=self.world.desktop.real_status();value.update(broker(self.world.desktop.store).state(session));self.respond(h,200,value);return

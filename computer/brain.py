@@ -459,9 +459,13 @@ class Brain:
         rows=[r for r in rows if r]
         if not rows:return '目前没有查到对应的电脑任务记录。'
         labels={'queued':'等待执行','running':'正在执行','succeeded':'检查通过并完成','failed':'执行未完成','blocked':'等待人工处理','interrupted':'已中断，结果需要核对','cancelled':'已停止'}
+        from private_input import inputs
+        private=inputs(self.computer)
         sentences=[]
         for row in rows:
-            line='任务“'+row['goal'][:70]+'”'+labels.get(row['state'],'状态未确认')+'。'+row['message']
+            if private.attention(row['id']):
+                line='这一步需要你补充网站信息。我已在已授权网页打开私密填写窗，填好后会继续，不用在聊天里告诉我密码。'
+            else:line='任务“'+row['goal'][:70]+'”'+labels.get(row['state'],'状态未确认')+'。'+row['message']
             if row.get('artifacts'):line+='已保存的产物有：'+'、'.join(x['path'] for x in row['artifacts'][:3])+'。'
             if row.get('unresolved_steps'):line+='有中断前未确认的操作，恢复时要先核对，不能直接重做。'
             sentences.append(line)

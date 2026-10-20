@@ -50,6 +50,37 @@ class HomeChatTests(unittest.TestCase):
             if rows and rows[-1]['state']!='working':return rows[-1]
             time.sleep(.01)
         self.fail('web chat did not finish')
+    def test_private_form_http_requires_cookie_origin_and_fences_revoked_submission(self):
+        from private_input import inputs,wipe
+        from test_private_input import form
+        self.computer.submit('a'*32,'合成私密填写，不访问真实账户');self.computer.next()
+        private=inputs(self.computer);request=private.offer('a'*32,form())
+        key=str(self.computer.media.root.resolve());previous=home._instances.get(key)
+        home._instances[key]=self.world;self.world.desktop=SimpleNamespace(store=self.computer)
+        server=ThreadingHTTPServer(('127.0.0.1',0),agent.handler(self.computer,'test-token',lambda:True,self.brain))
+        thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+        def call(path,payload=None,cookie=True,origin=True):
+            c=HTTPConnection('127.0.0.1',server.server_port,timeout=3)
+            headers={'Content-Type':'application/json','Origin':('https://127.0.0.1:'+str(server.server_port)) if origin else 'https://wrong.invalid'}
+            if cookie:headers['Cookie']=self.cookie
+            try:
+                c.request('POST' if payload is not None else 'GET','/home/api/private-input'+path,json.dumps(payload) if payload is not None else None,headers)
+                response=c.getresponse();return response.status,json.loads(response.read())
+            finally:c.close()
+        try:
+            self.assertEqual(call('',cookie=False)[0],401)
+            self.assertEqual(call('/claim',{'id':request['id']},origin=False)[0],403)
+            status,claim=call('/claim',{'id':request['id']});self.assertEqual(status,200)
+            payload=dict(id=request['id'],lease=claim['request']['lease'],values=dict(account='http@example.invalid',password='HTTP_PRIVATE_SENTINEL'),activate=True)
+            self.assertEqual(call('/submit',payload)[0],200)
+            self.assertNotIn('HTTP_PRIVATE_SENTINEL',json.dumps(call('')))
+            submission=private.consume('a'*32);self.world.logout(self.session)
+            self.assertFalse(private.valid(submission['id']));wipe(submission['values']);private.finish(submission['id'],False)
+        finally:
+            server.shutdown();server.server_close();thread.join(2)
+            if previous is None:home._instances.pop(key,None)
+            else:home._instances[key]=previous
+
     def test_room_snapshot_does_not_wait_for_brain_write_and_refreshes_name_later(self):
         # A web receipt holds the brain lock while rechecking room authorization.
         # Concurrent room snapshots must never wait for that lock in reverse.

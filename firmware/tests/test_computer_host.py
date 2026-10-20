@@ -11,6 +11,7 @@ class ComputerHostTests(unittest.TestCase):
 #include <string.h>
 #include "pet_computer.c"
 static bool configured=true,fail,cancel_request,preview;
+static const char *input_request="";
 static const char *server_state="queued",*server_id="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 static int calls;static char operation[24],submitted_id[33];
 bool pet_cloud_computer_configured(void){return configured;}
@@ -22,10 +23,28 @@ char *pet_cloud_computer(const char *op,const cJSON *request){
  snprintf(submitted_id,sizeof(submitted_id),"%s",text(request,"job_id"));
  cJSON*r=cJSON_CreateObject();cJSON_AddBoolToObject(r,"ok",true);
  cJSON_AddStringToObject(r,"job_id",server_id);cJSON_AddStringToObject(r,"state",server_state);
+ cJSON_AddStringToObject(r,"input_request_id",input_request);
  cJSON_AddStringToObject(r,"message","实际服务器进度");cJSON_AddBoolToObject(r,"auto_preview",preview);
  char*raw=cJSON_PrintUnformatted(r);cJSON_Delete(r);return raw;
 }
 '''+body,["pet_home","pet_util","pet_turn"])
+
+    def test_private_input_notice_is_proactive_once_per_step_and_keeps_polling(self):
+        self.run_computer(r'''
+int main(void){
+ assert(!pet_computer_start());assert(!pet_computer_submit("协助注册演示",server_id));
+ server_state="running";input_request="cccccccccccccccccccccccccccccccc";pet_computer_tick(100,false);
+ char msg[448],receipt[80];assert(busy());assert(pet_computer_result_pending(msg,sizeof(msg),receipt,sizeof(receipt)));
+ assert(strstr(msg,"私密填写窗")&&strstr(receipt,":input:"));assert(!pet_computer_result_delivered(receipt));
+ assert(!pet_computer_result_pending(msg,sizeof(msg),receipt,sizeof(receipt)));
+ assert(!pet_computer_start());pet_computer_tick(6000,false);assert(!strcmp(operation,"status"));
+ assert(!pet_computer_result_pending(msg,sizeof(msg),receipt,sizeof(receipt)));
+ input_request="dddddddddddddddddddddddddddddddd";pet_computer_tick(12000,false);
+ assert(pet_computer_result_pending(msg,sizeof(msg),receipt,sizeof(receipt)));assert(!pet_computer_result_delivered(receipt));
+ input_request="";server_state="succeeded";pet_computer_tick(18000,false);
+ assert(!busy());assert(pet_computer_result_pending(msg,sizeof(msg),receipt,sizeof(receipt))&&!strstr(receipt,":input:"));
+ return 0;}
+''')
 
     def test_lost_submit_reply_reboot_uses_same_id_and_never_claims_success(self):
         self.run_computer(r'''

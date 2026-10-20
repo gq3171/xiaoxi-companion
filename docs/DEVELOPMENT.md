@@ -18,6 +18,7 @@ python3 -m unittest discover -s computer -p 'test_*.py'
 node computer/test_home_web.cjs
 node computer/test_desktop_client.cjs
 node computer/test_novnc_render.cjs
+node computer/test_private_input.cjs
 python3 -m unittest discover -s firmware/tests -p 'test_cloud_host.py'
 python3 -m unittest discover -s firmware/tests -p 'test_voice_selection.py'
 python3 -m unittest discover -s firmware/tests -p 'test_runtime_core.py'

@@ -5,12 +5,13 @@ from task_context import redact
 from browser_tools import BrowserBlocked,BrowserUnavailable,BrowserCancelled
 from desktop_browser import DesktopBrowser
 from desktop_jobs import broker,DesktopBusy
+from private_input import inputs,wipe
 
 ACTIONS={'browser_open','browser_tabs','browser_snapshot','browser_click','browser_type','browser_key','browser_scroll','browser_check','browser_screenshot','browser_close','handoff'}
 def requires_browser(goal):return bool(re.search(r'浏览器|网页交互|注册|表单|登录|填写.{0,8}网站|点击.{0,8}网页',goal,re.I))
 
 def run_desktop(worker,job,messages=None,first=None,ordinal=1,checked=False,last_code=None):
-    store=worker.store;job_id=job['id'];state=broker(store);saved=state.load(job_id)
+    store=worker.store;job_id=job['id'];state=broker(store);private=inputs(store);saved=state.load(job_id)
     workspace=store.path.parent.parent/'work/browser'/job_id;workspace.mkdir(parents=True,exist_ok=True,mode=0o700)
     browser=DesktopBrowser(store,job_id,workspace,lambda:worker.cancelled(job_id));worker.active_job_id=job_id
     if saved:
@@ -22,15 +23,40 @@ def run_desktop(worker,job,messages=None,first=None,ordinal=1,checked=False,last
         if len(messages)>11:messages=messages[:1]+messages[-10:]
         state.save(job_id,dict(messages=messages,browser=browser.checkpoint(),uncertain=uncertain),phase)
     def observe(result):
-        raw=redact(json.dumps(result,ensure_ascii=False))
+        raw=redact(json.dumps(browser.private_redact(result) if hasattr(browser,"private_redact") else result,ensure_ascii=False))
         if len(raw.encode())>14000:raw=raw.encode()[:14000].decode('utf8','ignore')+' [观察内容已截短，必要时重新读取]'
         messages.append({'role':'user','content':json.dumps({'untrusted_tool_result':raw},ensure_ascii=False)})
     decisions=0
     def handoff(message):
-        # Publish the checkpoint and explanation together. Otherwise a quick
-        # take/give_back between these writes can be overwritten by this pause.
+        form=None
+        if hasattr(browser,'private_form'):
+            try:form=browser.private_form()
+            except (ValueError,BrowserUnavailable,BrowserBlocked):pass
+        if form:message='有一步需要你补充信息。我已打开网站专用的私密填写窗，请到已授权的网页填写；提交后我会继续。'
+        # Publish pause, checkpoint and private request atomically; a fast
+        # hand-back must never be overwritten by a delayed pause publication.
         with state.condition:
             checkpoint(phase='waiting_user');state.phase(job_id,'waiting_user',message[:500])
+            if form:private.offer(job_id,form)
+    def apply_private():
+        submission=private.consume(job_id)
+        if not submission:return False
+        success=False
+        try:
+            with state.private_action(job_id):
+                checkpoint(uncertain=True,phase='waiting_user')
+                valid=lambda:not worker.cancelled(job_id) and private.valid(submission['id'])
+                browser.private_apply(submission['form'],submission['values'],submission['activate'],valid)
+                success=True
+            messages.append({'role':'user','content':'主人已通过专用私密填写窗提供并核对本页信息。字段值不提供给模型。'+('主人授权的当前继续按钮已点击；不要重复点击。' if submission['activate'] else '本次只填写，没有授权点击继续按钮。')+'重新观察当前实际页面后继续原任务，不重放之前操作。'})
+            checkpoint();state.phase(job_id,'running','私密填写已送到当前网站，正在核对实际页面并继续任务。')
+        except Exception:
+            # An input/CDP timeout may already have changed the page. Never log
+            # its exception or replay values; owner must review the actual page.
+            state.phase(job_id,'waiting_user','本次填写结果需要核对，内容没有自动重发。请查看实际页面，核对后点继续任务。')
+        finally:
+            wipe(submission['values']);private.finish(submission['id'],success)
+        return success
     def stopped():
         status='interrupted' if worker.stop.is_set() else 'cancelled';store.update(job_id,status,'桌面任务已停止，页面和进度保留，未重复提交。');state.phase(job_id,'interrupted' if status=='interrupted' else 'done')
     try:
@@ -39,6 +65,11 @@ def run_desktop(worker,job,messages=None,first=None,ordinal=1,checked=False,last
             if browser.tabs:
                 value=browser.snapshot();observe(value)
                 if value.get('needs_human'):handoff(value['blocked_reason'])
+                elif hasattr(browser,'private_form'):
+                    try:
+                        form=browser.private_form()
+                        if form and form['fields']:handoff('当前页面需要主人补充信息。')
+                    except (ValueError,BrowserUnavailable,BrowserBlocked):pass
             messages.append({'role':'user','content':'恢复核对：之前的操作可能已经生效。以刚读取的实际页面为准，不重放旧点击或注册提交。'})
         while ordinal<=80 and decisions<160:
             if worker.cancelled(job_id):stopped();return
@@ -46,6 +77,7 @@ def run_desktop(worker,job,messages=None,first=None,ordinal=1,checked=False,last
             while state.waiting(job_id):
                 paused=True
                 if worker.cancelled(job_id):stopped();return
+                if apply_private():break
                 browser.heartbeat();worker.stop.wait(.25)
             if paused or state.state().get('phase')=='resume_requested':
                 first=None;checked=False;last_code=None;browser.snapshots.clear()
@@ -92,17 +124,24 @@ def run_desktop(worker,job,messages=None,first=None,ordinal=1,checked=False,last
                 store.record(job_id,ordinal,'desktop_handoff','protected step',0,'等待主人处理；未发送受保护输入。');ordinal+=1;handoff(str(error));continue
             except (ValueError,BrowserUnavailable) as error:
                 result={'error':str(error)[:240],'observe_again':True};code=1
+            if action=='browser_snapshot' and hasattr(browser,'private_form'):
+                try:
+                    form=browser.private_form()
+                    if form and form['fields']:
+                        handoff('这一步需要主人补充信息。')
+                except (ValueError,BrowserUnavailable,BrowserBlocked):pass
             if action in ('browser_open','browser_click','browser_type','browser_key','browser_scroll','browser_close','run'):checked=False
             if passed:checked=True
             last_code=code
             # Ordinary form values may be task data; credentials never reach this path.
-            command=redact(json.dumps(reply,ensure_ascii=False));output=redact(json.dumps(result,ensure_ascii=False))
+            command=redact(json.dumps(browser.private_redact(reply) if hasattr(browser,'private_redact') else reply,ensure_ascii=False));output=redact(json.dumps(browser.private_redact(result) if hasattr(browser,'private_redact') else result,ensure_ascii=False))
             if worker.key:command=command.replace(worker.key,'[服务凭据已隐藏]');output=output.replace(worker.key,'[服务凭据已隐藏]')
             store.record(job_id,ordinal,str(action),command,code,output);ordinal+=1
             messages.append({'role':'assistant','content':command});observe(result);checkpoint()
         store.update(job_id,'failed','浏览器步骤预算已用完；实际页面和步骤保留，没有假报完成。');state.phase(job_id,'done')
     except BrowserCancelled:stopped()
     finally:
+        private.close_job(job_id)
         browser.detach()
         try:browser.desktop.heartbeat()
         except Exception:pass

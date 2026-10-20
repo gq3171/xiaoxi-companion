@@ -368,7 +368,7 @@ char *pet_cloud_computer(const char *operation,const cJSON *request)
 {
 #if defined(CONFIG_DESKPET_COMPUTER_URL) && defined(CONFIG_DESKPET_COMPUTER_TOKEN)
     if(!pet_cloud_computer_configured()||!operation||
-       (strcmp(operation,"health")&&strcmp(operation,"submit")&&strcmp(operation,"status")&&strcmp(operation,"cancel")&&strcmp(operation,"resume")&&strcmp(operation,"media_list")&&strcmp(operation,"media_probe")&&strcmp(operation,"media_chunk")&&strcmp(operation,"resource")))return NULL;
+       (strcmp(operation,"private_input")&&strcmp(operation,"health")&&strcmp(operation,"submit")&&strcmp(operation,"status")&&strcmp(operation,"cancel")&&strcmp(operation,"resume")&&strcmp(operation,"media_list")&&strcmp(operation,"media_probe")&&strcmp(operation,"media_chunk")&&strcmp(operation,"resource")))return NULL;
     char url[384];snprintf(url,sizeof(url),"%s/v1/computer/%s",CONFIG_DESKPET_COMPUTER_URL,operation);
     return post_json(url,CONFIG_DESKPET_COMPUTER_TOKEN,false,(cJSON*)request,!strcmp(operation,"media_chunk")?96*1024:!strcmp(operation,"resource")?32*1024:8192);
 #else

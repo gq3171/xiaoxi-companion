@@ -22,3 +22,6 @@ const char *pet_computer_current_id(void);
 bool pet_computer_result_media(char *job_id,size_t capacity);
 bool pet_computer_media_presented(const char *job_id);
 const char *pet_computer_rules(void);
+
+/* Owner-only touch form; field values are transient and bypass chat/model. */
+void pet_computer_private_input(void);

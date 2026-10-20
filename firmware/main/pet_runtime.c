@@ -861,6 +861,7 @@ static void computer_updates(uint32_t generation)
         }else
 #endif
         pet_computer_result_delivered(receipt);
+        if(strstr(receipt,":input:"))pet_computer_private_input();
     }
 }
 

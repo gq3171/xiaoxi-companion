@@ -106,6 +106,19 @@ class DesktopJobs:
             self._expire();row=self._row(job)
             return bool(self.lease or row and row['phase']=='waiting_user')
     @contextlib.contextmanager
+    def private_action(self,job):
+        # Owner input may run while waiting_user, but cannot race a noVNC lease
+        # or another in-flight action. Never hold this condition during CDP I/O.
+        with self.condition:
+            self._expire()
+            row=self.store.db.execute('SELECT state,cancel FROM jobs WHERE id=?',(job,)).fetchone()
+            if self.lease or self.inflight or not row or row['state']!='running' or row['cancel']:
+                raise DesktopBusy('桌面当前不能执行私密填写')
+            self.inflight=True
+        try:yield
+        finally:
+            with self.condition:self.inflight=False;self.condition.notify_all()
+    @contextlib.contextmanager
     def action(self,job):
         with self.condition:
             if self.waiting(job):raise DesktopBusy('桌面正在等待主人处理')

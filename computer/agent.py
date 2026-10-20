@@ -31,6 +31,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from http_tls_server import ThreadedTLSServer, bounded_request
+from private_input import attention
 from skills import Skills
 from task_context import redact, clean_skill
 from urllib.request import Request, urlopen
@@ -387,6 +388,9 @@ def handler(store: Store, token: str, ready, brain=None):
                 job_id = request.get("job_id")
                 if not isinstance(job_id, str) or not JOB_ID.fullmatch(job_id):
                     raise ValueError("无效任务编号")
+                if self.path == "/v1/computer/private_input":
+                    from private_input import body_rpc
+                    self.respond(200,body_rpc(store,request));return
                 if self.path == "/v1/computer/submit":
                     goal = request.get("goal")
                     if not isinstance(goal, str) or not goal.strip() or len(goal.encode()) > 1024:
@@ -405,7 +409,7 @@ def handler(store: Store, token: str, ready, brain=None):
                 if not job:
                     self.respond(404, {"ok": False})
                     return
-                self.respond(200, {"ok": True, "job_id": job["id"], "state": job["state"], "message": job["message"], "auto_preview":any(m.get("kind") in ("image","video") for m in job.get("media",[])), "spoken_message":spoken_result(job)})
+                self.respond(200, {"ok": True, "job_id": job["id"], "state": job["state"], "message": job["message"], "auto_preview":any(m.get("kind") in ("image","video") for m in job.get("media",[])), "spoken_message":spoken_result(job), "input_request_id":attention(store,job["id"])})
             except (ValueError, TypeError):
                 self.respond(409, {"ok": False})
             except Exception:

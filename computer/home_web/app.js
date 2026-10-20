@@ -4,7 +4,7 @@ let current=null,previous=null,receivedAt=0,previousAt=0,manifest,images={},stre
 const message=text=>$('message').textContent=text;
 const connection=(text,online=false)=>{$('connection').textContent=text;$('connection').classList.toggle('online',online);};
 async function api(path,body){let r;try{r=await fetch('/home/'+path,{method:body?'POST':'GET',headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):undefined,credentials:'same-origin',cache:'no-store'});}catch{throw Error(location.protocol==='https:'?'连接被浏览器阻止或网络中断。请检查此电脑是否已信任小溪的 HTTPS 证书；这不表示 Token 错误。':'暂时连不上小溪的家，请检查本机入口和小主机网络连接。');}let value;try{value=await r.json();}catch{throw Error('连接没有返回完整响应，请稍后重试。');}if(r.status===401){logoutView();throw Error('请使用配对码或保存的访问 Token登录。');}return {status:r.status,value};}
-function logoutView(){stopDesktop();stopReminders();if(stream)stream.close();stream=null;current=previous=null;$('pair').hidden=false;$('home').hidden=true;$('leave').hidden=true;$('access-toggle').hidden=true;$('access').hidden=true;clearAccessSecrets();stopRecording(true);chatTurns=[];renderChat();}
+function logoutView(){stopPrivateInput();stopDesktop();stopReminders();if(stream)stream.close();stream=null;current=previous=null;$('pair').hidden=false;$('home').hidden=true;$('leave').hidden=true;$('access-toggle').hidden=true;$('access').hidden=true;clearAccessSecrets();stopRecording(true);chatTurns=[];renderChat();}
 async function loadAsset(name){
  for(let attempt=0;attempt<3;attempt++){
   try{return await new Promise((resolve,reject)=>{const im=new Image();im.onload=()=>resolve(im);im.onerror=()=>reject(Error('image unavailable'));im.src='/home/assets/'+name+'.png'+(attempt?'?retry='+attempt:'');});}
@@ -27,7 +27,7 @@ function accept(value){if(!value.ok||value.protocol!==1||!Array.isArray(value.wi
  connection(value.body_online?'和小板子一起在家':'网页在家',true);
 }
 function connect(){if(stream)stream.close();stream=new EventSource('/home/events');stream.onmessage=e=>{try{accept(JSON.parse(e.data));}catch{message('收到了一条不完整的同步消息，正在恢复。');}};stream.onerror=()=>{if(performance.now()-lastEvent>1500)connection('正在重新连接…');api('api/state').catch(()=>{});};}
-async function enter(){const {status,value}=await api('api/state');if(status!==200)throw Error('暂时连接不上小溪的家。');await assets();accept(value);$('pair').hidden=true;$('home').hidden=false;$('leave').hidden=false;$('access-toggle').hidden=false;if(!document.hidden)connect();message('');loadChat();connectReminders();startDesktop();}
+async function enter(){const {status,value}=await api('api/state');if(status!==200)throw Error('暂时连接不上小溪的家。');await assets();accept(value);$('pair').hidden=true;$('home').hidden=false;$('leave').hidden=false;$('access-toggle').hidden=false;if(!document.hidden)connect();message('');loadChat();connectReminders();startDesktop();startPrivateInput();}
 $('pair-form').addEventListener('submit',async e=>{e.preventDefault();const button=e.target.querySelector('button');button.disabled=true;try{const {status}=await api('api/login',{code:$('code').value.trim()});if(status!==200)throw Error('配对码已失效，请重新获取。');$('code').value='';await enter();}catch(error){message(error.message);}finally{button.disabled=false;}});
 $('token-form').addEventListener('submit',async e=>{e.preventDefault();const button=e.target.querySelector('button');button.disabled=true;try{const {status}=await api('api/login',{token:$('login-token').value.trim()});if(status!==200)throw Error('Token 不正确或尝试过于频繁，请稍后再试。');$('login-token').value='';await enter();}catch(error){message(error.message);}finally{button.disabled=false;}});
 $('leave').addEventListener('click',async()=>{try{await api('api/logout',{});}finally{logoutView();message('已退出这个窗口的配对。');}});
@@ -134,6 +134,10 @@ function cancelReminderPlayback(){if(reminderPlayer){reminderPlayer.onended=null
 function stopReminders(){if(alertStream)alertStream.close();alertStream=null;cancelReminderPlayback();if(reminderContext)reminderContext.close();reminderContext=null;reminderDue=[];reminderDismissed.clear();$('reminder-notice').hidden=true;}
 setInterval(reminderPresence,10000);
 
+let privateInputClient=null,privateInputEpoch=0;
+function stopPrivateInput(){privateInputEpoch++;privateInputClient?.stop();privateInputClient=null;}
+async function startPrivateInput(){stopPrivateInput();const epoch=privateInputEpoch;try{const module=await import('/home/private-input.js');if(epoch===privateInputEpoch&&current)privateInputClient=module.createPrivateInput({api});}catch{}}
+window.addEventListener('pagehide',stopPrivateInput);
 let desktopClient=null,desktopLoad=null,desktopExpanded=false,desktopEpoch=0;
 function stopDesktop(){desktopEpoch++;if(desktopClient)desktopClient.stop();desktopClient=null;}
 async function startDesktop(){stopDesktop();if(!current||document.hidden)return;const epoch=desktopEpoch;$('desktop-status').textContent='正在连接真实桌面…';try{desktopLoad=desktopLoad||import('/home/desktop-client.js');const module=await desktopLoad;if(epoch!==desktopEpoch||!current||document.hidden)return;desktopClient=module.createDesktop({api,viewport:$('desktop-viewport'),status:$('desktop-status'),task:$('desktop-task'),take:$('desktop-take'),resume:$('desktop-resume'),placeholder:$('desktop-placeholder')});}catch{$('desktop-status').textContent='桌面模块未加载，可以点重连。';desktopLoad=null;}}

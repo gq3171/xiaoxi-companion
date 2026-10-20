@@ -48,3 +48,7 @@ main{max-width:1280px;padding:24px 32px 12px}header{margin-bottom:18px}.pair{max
 .desktop-panel:has(.desktop-viewport.expanded) .desktop-heading #desktop-expand{position:static;padding:4px 8px;font-size:11px}
 /* Keep the native mouse arrow when the remote server has no cursor image. */
 .novnc-screen,.novnc-screen canvas{cursor:default!important}
+
+.private-notice{background:#fff3dd;border:1px solid #d6a77f;border-radius:14px;padding:14px;margin:12px 0}.private-notice p{margin:8px 0}.private-dialog{width:min(480px,calc(100vw - 32px));max-height:90dvh;overflow:auto;box-sizing:border-box;background:#fff9f2;color:#54413d;border:1px solid #cc9f88;border-radius:20px;padding:24px}.private-dialog::backdrop{background:rgba(45,32,35,.45)}.private-dialog h2{margin-top:0}.private-dialog strong{overflow-wrap:anywhere}.private-fields{display:grid;gap:14px;margin:20px 0}.private-fields label{display:grid;gap:6px}.private-fields input,.private-fields select{box-sizing:border-box;width:100%;min-height:44px;border:1px solid #d9b6a3;border-radius:9px;background:white;color:#493d39;padding:10px;font:inherit}.private-buttons{display:flex;gap:12px;justify-content:flex-end;margin-top:18px}#private-error{color:#9b3333}#private-activate-row{display:flex;gap:8px;align-items:flex-start}#private-activate-row[hidden]{display:none}
+
+#private-activate-row{justify-content:flex-start}#private-activate-row input{width:16px;min-width:16px;min-height:0;flex:0 0 16px;margin:3px 0 0;padding:0}#private-activate-label{flex:1}
