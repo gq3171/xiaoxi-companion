@@ -140,13 +140,7 @@ class VisualBrowser:
         item=self.visual_target(page,x,y)
         if (item['backend'],item['role'],item['name']) not in value['identities']:
             raise BrowserUnavailable('截图后出现了新的目标或遮挡，请重新观察')
-        if item['tag']=='canvas' or item['role'] not in ('button','link','tab','menuitem','checkbox','radio','textbox','searchbox','combobox'):
-            # Canvas has no semantic controls. Never let opaque pixels bypass
-            # authentication/final-action guards. Only navigation/selection on a
-            # page without forms, links to final actions, or sensitive content.
-            safe=page.evaluate(r'''(()=>{const text=(document.body.innerText||'');return !document.querySelector('form,input,textarea,select')&&!/支付|付款|转账|订阅|删除|注册|登录|验证码|发布|发送|payment|checkout|delete|sign.?in|sign.?up|captcha|publish|send message/i.test(text);})()''')
-            if safe is not True:raise BrowserBlocked('Canvas目标缺少可靠动作语义，当前页面需要主人核对后操作。')
-        self.before_activate(page,item,'click')
+        self.visual_guard(page,item)
         old=value['pixels'];pad=4
         crop=(max(0,int(l*old.width/1000)-pad),max(0,int(t*old.height/1000)-pad),min(old.width,math.ceil(r*old.width/1000)+pad),min(old.height,math.ceil(b*old.height/1000)+pad))
         page.call('Input.dispatchMouseEvent',dict(type='mouseMoved',x=x,y=y,button='none'))
@@ -159,9 +153,21 @@ class VisualBrowser:
                 raise BrowserUnavailable('点击前目标已被替换或遮挡，请重新观察')
             time.sleep(.05)
         if self.cancelled():raise BrowserCancelled('任务已停止')
+        self.visual_guard(page,item)
+        if self.document(page)!=value['document'] or self.visual_surface(page)!=value['surface']:
+            raise BrowserUnavailable('发出点击前页面已变化，请重新观察')
         self.snapshots.pop(self.current,None)
         try:
             page.call('Input.dispatchMouseEvent',dict(type='mousePressed',x=x,y=y,button='left',clickCount=1))
         finally:
             page.call('Input.dispatchMouseEvent',dict(type='mouseReleased',x=x,y=y,button='left',clickCount=1))
         return dict(dispatched=True,verification=False,target=item['name'] or target,method='fresh_screenshot_and_live_hit_target')
+
+    def visual_guard(self,page,item):
+        if item['tag']=='canvas' or item['role'] not in ('button','link','tab','menuitem','checkbox','radio','textbox','searchbox','combobox'):
+            # Canvas has no semantic controls. Never let opaque pixels bypass
+            # authentication/final-action guards. Only navigation/selection on a
+            # page without forms, links to final actions, or sensitive content.
+            safe=page.evaluate(r'''(()=>{const text=(document.body.innerText||'');return !document.querySelector('form,input,textarea,select')&&!/支付|付款|转账|订阅|删除|注册|登录|验证码|发布|发送|payment|checkout|delete|sign.?in|sign.?up|captcha|publish|send message/i.test(text);})()''')
+            if safe is not True:raise BrowserBlocked('Canvas目标缺少可靠动作语义，当前页面需要主人核对后操作。')
+        self.before_activate(page,item,'click')

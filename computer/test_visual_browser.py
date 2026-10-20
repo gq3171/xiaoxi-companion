@@ -8,7 +8,7 @@ from visual_browser import VisualBrowser,_SURFACE
 class Page:
  def __init__(self):
   self.surface=dict(url='https://example.invalid/',width=800,height=600,x=0,y=0,scale=1,sensitive=False,captcha=False,framed=False)
-  self.document='doc';self.events=[];self.backend=8;self.modified=False;self.block=False;self.press_failure=False;self.change_on_move=False
+  self.document='doc';self.events=[];self.backend=8;self.modified=False;self.block=False;self.press_failure=False;self.change_on_move=False;self.activation_change=False;self.guard_calls=0
  def image(self):
   image=Image.new('RGB',(1600,1200),'white');draw=ImageDraw.Draw(image)
   draw.rectangle((640,480,960,720),fill='blue' if not self.modified else 'red')
@@ -29,7 +29,8 @@ class Page:
 
 class Fixture(VisualBrowser,Browser):
  def before_activate(self,page,item,mode):
-  if page.block:raise BrowserBlocked('protected')
+  page.guard_calls+=1
+  if page.block or page.activation_change and page.guard_calls>1:raise BrowserBlocked('protected')
 
 class VisualTests(unittest.TestCase):
  def setUp(self):
@@ -55,9 +56,9 @@ class VisualTests(unittest.TestCase):
     with self.assertRaises(BrowserUnavailable):self.click(token)
     self.assertFalse(self.presses())
  def test_target_pixel_change_hover_change_and_protected_action_rejected(self):
-  for field in ('modified','change_on_move','block','backend'):
+  for field in ('modified','change_on_move','block','backend','activation_change'):
    with self.subTest(field=field):
-    token=self.observe();setattr(self.page,field,9 if field=='backend' else True)
+    self.page.guard_calls=0;token=self.observe();setattr(self.page,field,9 if field=='backend' else True)
     with self.assertRaises((BrowserUnavailable,BrowserBlocked)):self.click(token)
     self.assertFalse(self.presses());setattr(self.page,field,8 if field=='backend' else False)
  def test_sensitive_frame_captcha_and_private_values_never_capture(self):
