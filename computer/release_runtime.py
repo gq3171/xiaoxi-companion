@@ -41,7 +41,7 @@ def validate(release,install):
     files=manifest.get('files',{});baseline=manifest.get('baseline',{})
     if not files or not {'agent.py','brain.py','companion.py'}<=files.keys() or not files.keys()<=baseline.keys():raise ValueError('incomplete entrypoint baseline')
     for name,digest in files.items():
-        if (Path(name).suffix not in ('.py','.js','.html','.css','.so','.c','.h') and name!='runtime.defaults.json') or name.startswith(('experimental/','vendor/')):raise ValueError('not a runtime update path')
+        if (Path(name).suffix not in ('.py','.js','.html','.css','.so','.c','.h') and name not in ('runtime.defaults.json','providers.defaults.json')) or name.startswith(('experimental/','vendor/')):raise ValueError('not a runtime update path')
         if sha(checked_path(release,name))!=digest:raise ValueError('staged source changed')
     for name,expected in baseline.items():
         p=checked_path(install,name)

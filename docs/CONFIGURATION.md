@@ -1,15 +1,16 @@
 # 配置清单
 
-首次只需运行 `sudo ./install.sh --setup`，提供或确认数据目录、访问地址、**后端模型名和该服务的 API Key**。安装器显示的模型建议不等于你的账号一定开通，必须按自己的账号确认。当前协议适配 MiniMax；不声称任意厂商 Key 可以互换。
+首次只需运行 `sudo ./install.sh --setup`，提供或确认数据目录、访问地址、**后端模型名和该服务的 API Key**。安装器显示的模型建议不等于你的账号一定开通，必须按自己的账号确认。可选预设或自定义协议，对话与语音/搜索解耦，详见 [多模型接入](MODELS.md)。
 
 ## 配置放在哪里
 
 | 文件 | 内容 | 权限 / 生效 |
 |---|---|---|
 | `/etc/xiaoxi/install.json` | 数据/软件/桌面/浏览器目录、真实挂载点、端口、公共 origin、运行参数、用户名称 | 不含密钥，root 管理、644；运行参数修改后重启，路径等迁移见下文 |
-| `数据目录/config/service.env` | `MINIMAX_MODEL`、`MINIMAX_API_KEY`、`MINIMAX_API_HOST`、Computer Token、origin | 600，不能公开；模型/提供商 env 值优先于默认选项 |
+| `数据目录/config/service.env` | `LLM_*`、`ASR_*`、`TTS_*`、`SEARCH_*`、Computer Token、origin | 600，不能公开；模型/提供商 env 值优先于默认选项 |
 | `数据目录/config/brain.env` | 独立 Brain Token | 600，自动生成并保留 |
 | `数据目录/config/systemd/` | 按实际配置生成的三份 systemd unit | 主脑自动启用；可选图形桌面另行配置 |
+| `computer/providers.defaults.json` | 服务商地址/协议预设，用户可覆盖地址，不代表开通权益 | 不含密钥；安装时复制 |
 | `computer/runtime.defaults.json` | 版本随附的非秘密默认参数 | 不需逐项填写；首次可用 `--settings-file` 提供覆盖 |
 | `firmware/sdkconfig` | 板端 Wi-Fi、主机连接、本地模型开关和独立模式模型名 | 本地私有文件，不提交 |
 
@@ -33,7 +34,9 @@
 
 ## 模型和语音
 
-`MINIMAX_MODEL` 与 `MINIMAX_API_KEY` 为新安装必需字段；向导隐藏输入 Key，自动化使用 `computer/env.example` 的私有副本。模型名会实际进入聊天、反思和任务的 API 请求，不再写死旗舰型号。不同模型是否支持 effort、音频和搜索，以你的账号和提供商接口为准；不会自动转用付费备用服务。
+使用通用 `LLM_PROVIDER`、`LLM_MODEL`、`LLM_API_KEY`，按需覆盖 `LLM_BASE_URL` 与 `LLM_API_TYPE`；旧 `MINIMAX_*` 仅在 MiniMax 模式兼容读取。ASR/TTS/search 的独立配置和 Key 规则见 [MODELS.md](MODELS.md)。不会因某个服务失败而自动换厂商/账户。
+
+`options.llm.send_temperature` 可为 `auto` / true / false；`effort_mode` 可为 `auto` / `none` / `minimax` / `openai`；`token_parameter` 可为 `auto` / `max_tokens` / `max_completion_tokens`（Chat 协议）。预设默认只发送保守、受支持的参数；模型所支持的思考参数由部署者确认，不能把 MiniMax 的 output_config 原样交给任意模型。
 
 可选运行参数在定位 JSON 的 `options` 中（首次 `--settings-file` 接收相同结构）：
 
@@ -47,11 +50,11 @@
 }
 ```
 
-只写要覆盖的字段，缺项沿用默认；未知字段/越界数值会拒绝启动。Key 禁止放进 `options`。后端模型名/API 地址以私有 `service.env` 为准；不要在两处维护互相矛盾的值。板子的已保存音色选择优先于初始音色，网页使用配置中的默认音色。主脑对板端旧版默认 TTS/ASR 型号进行统一覆盖；音频仍固定为双方约定的 16kHz 单声道 PCM。
+只写要覆盖的字段，缺项沿用默认；未知字段/越界数值会拒绝启动。Key 禁止放进 `options`。后端模型名/API 地址以私有 `service.env` 为准；不要在两处维护互相矛盾的值。MiniMax 模式下板子已保存音色优先于初始音色，网页使用默认音色。兼容 OpenAI 的 TTS 使用 `TTS_VOICE` 或 `speech.openai_voice`；板端内置 MiniMax 音色列表目前不映射其它厂商。主脑对板端旧版默认 TTS/ASR 型号进行统一覆盖；音频仍固定为双方约定的 16kHz 单声道 PCM。兼容 OpenAI 的 PCM 合成默认按 24kHz 接收、经 FFmpeg 缓冲重采样，`speech.openai_pcm_rate` 可设实际上游采样率；它不是端到端实时语音。
 
 ## 保留为代码约束的内容
 
-- HTTPS 验证、Cookie/Token 鉴权、VNC Unix socket、CDP 仅 loopback、模型提供商 origin 校验；没有“关闭安全”配置。
+- HTTPS 验证、Cookie/Token 鉴权、VNC Unix socket、CDP 仅 loopback、模型 URL 格式/TLS 校验与禁止凭据重定向；没有“关闭安全”配置。
 - 消息协议、音频采样/帧大小、场景 wire 格式、资源摘要、公开模型布局和 Flash 分区；不能当普通运行参数随意修改。
 - 已验证的 WayVNC 源码版本、URL 和摘要固定在构建脚本中，升级要同时审查源码与校验值。
 - 硬件引脚/驱动属 BSP，板端可调模型、亮度/省电和网络开关由 Kconfig/设备设置管理。

@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import re
 from deployment_paths import read_layout
+from backend_config import base_url, PRESETS, API_TYPES
 
 DEFAULTS=json.loads(Path(__file__).with_name('runtime.defaults.json').read_text())
 
@@ -24,12 +25,16 @@ def validate(options):
     merge(result,options)
     for key in ('model',):
         if not isinstance(result['llm'][key],str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._:/-]{0,159}',result['llm'][key]):raise ValueError('invalid model name')
-    if result['llm']['api_host'] not in ('https://api.minimaxi.com','https://api.minimax.io','https://api.minimax.cn'):
-        raise ValueError('unsupported provider origin')
-    for field in ('tts_model','asr_model'):
+    base_url(result['llm']['api_host'])
+    if result['llm']['provider'] not in PRESETS or result['llm']['api_type'] not in ('auto',)+API_TYPES:raise ValueError('invalid model provider/protocol')
+    if result['llm']['send_temperature']!='auto' and type(result['llm']['send_temperature']) is not bool:raise ValueError('invalid temperature capability')
+    if result['llm']['effort_mode'] not in ('auto','none','minimax','openai'):raise ValueError('invalid effort mode')
+    if result['llm']['token_parameter'] not in ('auto','max_tokens','max_completion_tokens'):raise ValueError('invalid token parameter')
+    for field in ('tts_model','asr_model','openai_tts_model','openai_asr_model'):
         if not isinstance(result['speech'][field],str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,100}',result['speech'][field]):raise ValueError('invalid speech configuration')
+    if not voice_valid(result['speech']['openai_voice']):raise ValueError('invalid compatible voice ID')
     if not voice_valid(result['speech']['default_voice']):raise ValueError('invalid default voice ID')
-    bounds={'llm.timeout_seconds':(5,120),'llm.dialogue_max_tokens':(256,65536),'llm.reflection_max_tokens':(256,65536),
+    bounds={'speech.openai_pcm_rate':(8000,48000),'llm.timeout_seconds':(5,120),'llm.dialogue_max_tokens':(256,65536),'llm.reflection_max_tokens':(256,65536),
             'desktop.cdp_port':(1024,65535),'desktop.probe_cdp_port':(1024,65535),'desktop.max_fps':(1,30),
             'desktop.headless_idle_seconds':(30,86400),'web.preview_port':(1024,65535),
             'http.connection_limit':(4,128),'http.handshake_limit':(1,32),'http.handshake_timeout':(1,30)}
@@ -68,9 +73,9 @@ def public_origin():
     return os.environ.get('DESKPET_PUBLIC_ORIGIN',layout.get('public_origin','https://xiaoxi.example:'+str(layout['port']))).rstrip('/')
 
 
-def rewrite_asr_model(body):
+def rewrite_asr_model(body,model=None):
     prefix=b'------deskpet\r\nContent-Disposition: form-data; name="model"\r\n\r\n'
     if not body.startswith(prefix):raise ValueError('missing ASR model form field')
     previous,separator,audio=body[len(prefix):].partition(b'\r\n------deskpet\r\n')
     if not separator or len(previous)>160:raise ValueError('invalid ASR model form field')
-    return prefix+settings()['speech']['asr_model'].encode()+separator+audio
+    return prefix+(model or settings()['speech']['asr_model']).encode()+separator+audio

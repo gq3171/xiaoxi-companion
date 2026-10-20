@@ -29,4 +29,6 @@ python3 -m unittest discover -s firmware/tests -p 'test_runtime_core.py'
 
 发布前运行完整回归、检查许可证与私人数据。禁止提交运行时导出、个人语音、原始私有参考图、实际服务 CA/私钥、数据库或包含凭据的固件。公共历史应只包含经过审查的公开文件。
 
-部署配置统一由 `deployment_paths.py` 与 `runtime_config.py` 读取；改动路径/模型字段时需跑安装器、配置一致性和实际请求回归。未知配置必须拒绝，不能悄悄回到另一块磁盘或其他付费模型。
+部署配置统一由 `deployment_paths.py`、`runtime_config.py` 与 `backend_config.py` 读取；改动路径/模型字段时需跑安装器、配置一致性和实际请求回归。未知配置必须拒绝，不能悄悄回到另一块磁盘或其他付费模型。
+
+多模型回归入口 `python3 -m unittest discover -s computer -p test_model_backends.py`，包含不调用云服务的本地 HTTP 和音频夹具。修改协议时同时检查模型/Key 路由、流结束、取消与任务执行，不只替换模型字符串。

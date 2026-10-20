@@ -41,7 +41,9 @@ cd xiaoxi-companion
 sudo ./install.sh --setup
 ```
 
-只需确认四项：**数据目录、访问域名或局域网 IP、你开通的后端模型名称、该模型的 API Key**。Key 隐藏输入；其余依赖安装、原生库/素材生成、服务 Token、证书与启动检查自动完成。当前集成 MiniMax，不能直接填入另一家服务的 Key。
+向导询问必要项：**数据目录、访问域名/IP、服务商、API 地址、实际模型名和对应 API Key**。常见服务商提供预设；Key 隐藏输入，其余依赖、原生库/素材、Token、证书与启动检查自动完成。
+
+支持 MiniMax、OpenAI Responses、Anthropic Messages 和 OpenAI Chat 兼容接口；提供 DeepSeek、千问、豆包、Gemini、Ollama 与自定义网关预设。**对话、语音识别、语音合成、搜索独立配置**，无需所有能力都来自同一家。接口/配置方式和已验证范围见 [多模型接入](docs/MODELS.md)。
 
 数据目录由你提供，不要求磁盘叫 NVMe，也不要求挂载到特定位置；例如 `/srv/fastdisk/xiaoxi`、`/data/pets/xiaoxi` 都可以。填写一个挂载点时会使用它下面的 `xiaoxi` 专用子目录。安装后路径会保存，桌面、浏览器和维护工具共用配置，不必重复填写。
 

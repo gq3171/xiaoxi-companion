@@ -7,12 +7,21 @@
     "reflection_max_tokens": 8192,
     "dialogue_effort": "low",
     "reflection_effort": "high",
-    "temperature": 1
+    "temperature": 1,
+    "provider": "minimax",
+    "api_type": "auto",
+    "send_temperature": "auto",
+    "effort_mode": "auto",
+    "token_parameter": "auto"
   },
   "speech": {
     "tts_model": "speech-2.8-turbo",
     "asr_model": "asr-1.0",
-    "default_voice": "female-shaonv"
+    "default_voice": "female-shaonv",
+    "openai_tts_model": "gpt-4o-mini-tts",
+    "openai_asr_model": "whisper-1",
+    "openai_voice": "alloy",
+    "openai_pcm_rate": 24000
   },
   "desktop": {
     "cdp_port": 19223,
@@ -29,6 +38,11 @@
     "connection_limit": 64,
     "handshake_limit": 8,
     "handshake_timeout": 4,
-    "lane_limits": {"rpc": 16, "web": 20, "events": 20, "desktop": 8}
+    "lane_limits": {
+      "rpc": 16,
+      "web": 20,
+      "events": 20,
+      "desktop": 8
+    }
   }
 }

@@ -1,0 +1,74 @@
+{
+  "minimax": {
+    "api_type": "minimax-messages",
+    "base_url": "https://api.minimaxi.com",
+    "suggested_model": "MiniMax-M3.1-Flash",
+    "temperature": true,
+    "effort": "minimax",
+    "token_parameter": "max_tokens"
+  },
+  "openai": {
+    "api_type": "openai-responses",
+    "base_url": "https://api.openai.com/v1",
+    "suggested_model": "",
+    "temperature": false,
+    "effort": "none",
+    "token_parameter": "max_completion_tokens"
+  },
+  "anthropic": {
+    "api_type": "anthropic",
+    "base_url": "https://api.anthropic.com/v1",
+    "suggested_model": "",
+    "temperature": false,
+    "effort": "none",
+    "token_parameter": "max_tokens"
+  },
+  "deepseek": {
+    "api_type": "openai-chat",
+    "base_url": "https://api.deepseek.com",
+    "suggested_model": "",
+    "temperature": true,
+    "effort": "none",
+    "token_parameter": "max_tokens"
+  },
+  "qwen": {
+    "api_type": "openai-chat",
+    "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "suggested_model": "",
+    "temperature": true,
+    "effort": "none",
+    "token_parameter": "max_tokens"
+  },
+  "doubao": {
+    "api_type": "openai-chat",
+    "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+    "suggested_model": "",
+    "temperature": true,
+    "effort": "none",
+    "token_parameter": "max_tokens"
+  },
+  "gemini": {
+    "api_type": "openai-chat",
+    "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+    "suggested_model": "",
+    "temperature": false,
+    "effort": "none",
+    "token_parameter": "max_tokens"
+  },
+  "ollama": {
+    "api_type": "openai-chat",
+    "base_url": "http://127.0.0.1:11434/v1",
+    "suggested_model": "",
+    "temperature": true,
+    "effort": "none",
+    "token_parameter": "max_tokens"
+  },
+  "custom": {
+    "api_type": "openai-chat",
+    "base_url": "",
+    "suggested_model": "",
+    "temperature": false,
+    "effort": "none",
+    "token_parameter": "max_tokens"
+  }
+}

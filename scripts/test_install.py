@@ -84,13 +84,38 @@ class ConfigurableInstallerTests(unittest.TestCase):
         from argparse import Namespace
         args=Namespace(data_dir=self.base,hostname='127.0.0.1',port=19491,env_file=None,model=None)
         secret='test-'+'a'*32;output=io.StringIO();stderr=io.StringIO()
-        with patch('sys.stdin.isatty',return_value=True),patch('os.geteuid',return_value=0),patch.object(i,'inspect',return_value=True),patch('builtins.input',side_effect=['','','chosen-model']),patch.object(i.getpass,'getpass',return_value=secret) as hidden,contextlib.redirect_stdout(output),contextlib.redirect_stderr(stderr):
+        with patch('sys.stdin.isatty',return_value=True),patch('os.geteuid',return_value=0),patch.object(i,'inspect',return_value=True),patch('builtins.input',side_effect=['','','minimax','','chosen-model']),patch.object(i.getpass,'getpass',return_value=secret) as hidden,contextlib.redirect_stdout(output),contextlib.redirect_stderr(stderr):
             values=i.setup_values(args)
-        self.assertEqual(values['MINIMAX_MODEL'],'chosen-model');hidden.assert_called_once()
+        self.assertEqual(values['LLM_MODEL'],'chosen-model');hidden.assert_called_once()
         self.assertNotIn(secret,output.getvalue()+stderr.getvalue());self.assertFalse(i.LOCATION.exists())
     def test_nonempty_unmanaged_directory_is_never_claimed_or_chmodded(self):
         self.base.mkdir();file=self.base/'existing-user-file';file.write_text('preserve')
         with self.assertRaises(i.InstallError):i.check_existing()
         self.assertEqual(file.read_text(),'preserve')
+
+
+class MultiProviderInstallerTests(unittest.TestCase):
+    setUp=InstallerTests.setUp
+    tearDown=InstallerTests.tearDown
+    def test_generic_config_selects_vendor_model_endpoint_and_private_key(self):
+        for provider in ('deepseek','anthropic','openai','qwen','doubao','gemini'):
+            with self.subTest(provider=provider):
+                values=i.provider_values(dict(LLM_PROVIDER=provider,LLM_MODEL='chosen-model',LLM_API_KEY='fixture-key'))
+                self.assertEqual(values['LLM_PROVIDER'],provider);self.assertEqual(values['LLM_MODEL'],'chosen-model')
+                self.assertEqual(values['LLM_BASE_URL'],i.backend_config.PRESETS[provider]['base_url'])
+                self.assertNotIn('MINIMAX_API_KEY',values)
+    def test_cloud_model_and_its_own_key_are_mandatory_but_local_key_is_optional(self):
+        for values in (dict(LLM_PROVIDER='minimax',LLM_API_KEY='fixture-key'),dict(LLM_PROVIDER='deepseek',LLM_MODEL='chosen-model',MINIMAX_API_KEY='foreign-key')):
+            with self.assertRaises(i.InstallError):i.provider_values(values)
+        self.assertEqual(i.provider_values(dict(LLM_PROVIDER='ollama',LLM_MODEL='local-model'))['LLM_API_KEY'],'')
+    def test_enabled_voice_service_does_not_borrow_the_chat_vendor_key(self):
+        with self.assertRaises(i.InstallError):i.provider_values(dict(LLM_PROVIDER='deepseek',LLM_MODEL='chosen-model',LLM_API_KEY='chat-key',TTS_PROVIDER='minimax'))
+        values=i.provider_values(dict(LLM_PROVIDER='deepseek',LLM_MODEL='chosen-model',LLM_API_KEY='chat-key',TTS_PROVIDER='minimax',TTS_API_KEY='voice-key'))
+        self.assertEqual(values['LLM_API_KEY'],'chat-key');self.assertEqual(values['TTS_API_KEY'],'voice-key')
+    def test_generic_file_and_cli_must_agree_and_never_expose_keys(self):
+        p=self.root/'provider.env';p.write_text('LLM_PROVIDER=deepseek\nLLM_MODEL=chosen-model\nLLM_API_KEY=fixture-key\n');p.chmod(0o600)
+        self.assertEqual(i.private_input(p)['LLM_PROVIDER'],'deepseek')
+        with self.assertRaises(i.InstallError) as error:i.private_input(p,provider='openai')
+        self.assertNotIn('fixture-key',str(error.exception))
 
 if __name__=='__main__':unittest.main()

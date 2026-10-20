@@ -206,17 +206,16 @@ class Worker:
     def __init__(self, store: Store, model=None):
         self.store = store
         self.stop = threading.Event()
-        self.key = os.environ.get("MINIMAX_API_KEY", "")
-        self.host = os.environ.get("MINIMAX_API_HOST", settings()["llm"]["api_host"]).rstrip("/")
-        if not self.host.startswith("https://"):
-            raise ValueError("MiniMax地址必须是HTTPS")
+        from brain import Provider
+        self.provider=Provider()
+        self.key,self.host=self.provider.key,self.provider.host
         self.model = model or self.complete
         self.active_job_id = None
 
     def complete(self, messages: list[dict]) -> dict:
             from brain import Provider,parse_answer
             live=lambda:not self.stop.is_set() and (not self.active_job_id or not self.cancelled(self.active_job_id))
-            return parse_answer(Provider(self.key,self.host).complete(SYSTEM,messages,live=live))
+            return parse_answer(self.provider.complete(SYSTEM,messages,live=live))
 
     def cancelled(self, job_id: str) -> bool:
         job = self.store.get(job_id)
@@ -434,10 +433,10 @@ def main():
         from brain import Brain, BrainStore, NativeMemory, Provider
         brain = Brain(BrainStore(args.data.with_name('brain.sqlite3'),
                                 NativeMemory(Path(__file__).with_name('libbrain_memory.so'))),
-                      Provider(worker.key, worker.host), os.environ['DESKPET_BRAIN_TOKEN'], computer=store)
+                      worker.provider, os.environ['DESKPET_BRAIN_TOKEN'], computer=store)
     thread = threading.Thread(target=worker.serve, daemon=True)
     thread.start()
-    server = ThreadedTLSServer((args.host, args.port), handler(store, token, lambda: bool(worker.key), brain))
+    server = ThreadedTLSServer((args.host, args.port), handler(store, token, lambda: worker.provider.ready, brain))
     if bool(args.tls_cert) != bool(args.tls_key):
         raise SystemExit("TLS证书和私钥必须同时提供")
     if args.tls_cert:

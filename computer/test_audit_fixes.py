@@ -33,16 +33,13 @@ class AuditFixTests(unittest.TestCase):
 
     def test_worker_uses_existing_streaming_provider_and_cancellation_callback(self):
         observations=[]
-        class Provider:
-            def __init__(self,key,host):pass
-            def complete(self,system,messages,live=None):
-                observations.append(live());return '{"action":"finish","state":"failed"}'
-        fake=types.SimpleNamespace(Provider=Provider,parse_answer=json.loads)
+        def complete(system,messages,live=None):
+            observations.append(live());return '{"action":"finish","state":"failed"}'
         with tempfile.TemporaryDirectory() as tmp:
             store=agent.Store(Path(tmp)/'jobs.sqlite3')
             try:
                 worker=agent.Worker(store)
-                with patch.dict('sys.modules',{'brain':fake}):
+                with patch.object(worker.provider,'complete',side_effect=complete):
                     self.assertEqual(worker.complete([])['action'],'finish')
                     worker.stop.set();worker.complete([])
                 self.assertEqual(observations,[True,False])

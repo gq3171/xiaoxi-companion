@@ -23,7 +23,7 @@ sudo python3 computer/build_wayvnc_headless.py --install
 首次创建独立 `deskpet-desktop` 系统账户，home 为 `/etc/xiaoxi/install.json` 的 `desktop_root`（默认数据目录下的 `desktop`），shell `/usr/sbin/nologin`，附加组 `render,video`，不授予 sudo。先检查是否已有同名账户、目录或服务；有的话保留配置并核对归属，不能覆盖。
 
 - 创建并将配置中的 `desktop_root` 归属该账户；祖先目录须允许该账户通行，必要时用仅 traverse 的具名 ACL，权限 700。
-- 从仓库 `computer/` 将 `desktop_daemon.py`、`desktop_shell.py`、`desktop_stop.py`、`desktop_launcher.py`、`deployment_paths.py`、`runtime_config.py`、`runtime.defaults.json` 复制到定位配置的 `desktop_install_dir`，软件目录 root 所有、755，源文件 644。数据、浏览器 profile、缓存、下载和日志均在所选数据目录。
+- 从仓库 `computer/` 将 `desktop_daemon.py`、`desktop_shell.py`、`desktop_stop.py`、`desktop_launcher.py`、`deployment_paths.py`、`runtime_config.py`、`backend_config.py`、`runtime.defaults.json`、`providers.defaults.json` 复制到定位配置的 `desktop_install_dir`，软件目录 root 所有、755，源文件 644。数据、浏览器 profile、缓存、下载和日志均在所选数据目录。
 - 把安装器生成的 `数据目录/config/systemd/deskpet-desktop.service` 放到 systemd unit 目录，执行 `systemctl daemon-reload`。**不要设成开机自动拉起**：主脑按需启动桌面，空闲自动回收。服务内部按关键进程状态管理退出，`Restart=no` 是有意设置。
 - 确认 `DESKPET_PUBLIC_ORIGIN` 是自己的真实 HTTPS origin，与浏览器地址完全一致。
 

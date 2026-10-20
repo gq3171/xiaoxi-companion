@@ -31,6 +31,7 @@ SOURCE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SOURCE/'computer'))
 import deployment_paths as layout
 import runtime_config
+import backend_config
 LOCATION = layout.DEFAULT_LOCATOR
 BASE = layout.LEGACY_ROOT if (layout.LEGACY_ROOT/'config/service.env').exists() else Path('/var/lib/xiaoxi')
 CURRENT_LAYOUT = None
@@ -38,7 +39,8 @@ INSTALL = Path('/opt/deskpet-computer')
 UNIT = Path('/etc/systemd/system/deskpet-computer.service')
 PACKAGES = ['python3', 'python3-pil', 'python3-websocket', 'build-essential',
             'openssl', 'ffmpeg', 'ca-certificates', 'acl']
-ALLOWED = {'MINIMAX_API_KEY', 'MINIMAX_API_HOST', 'MINIMAX_MODEL'}
+ALLOWED = {'MINIMAX_API_KEY', 'MINIMAX_API_HOST', 'MINIMAX_MODEL', 'LLM_PROVIDER', 'LLM_API_TYPE', 'LLM_BASE_URL', 'LLM_MODEL', 'LLM_API_KEY', 'TTS_VOICE'}
+ALLOWED |= {kind+'_'+field for kind in ('ASR','TTS','SEARCH') for field in ('PROVIDER','BASE_URL','MODEL','API_KEY')}
 EVENTS = []
 
 
@@ -82,32 +84,50 @@ def env_read(path):
     return values
 
 
-def private_input(path, model=None):
+def private_input(path, model=None, provider=None, api_base=None, api_type=None):
     p = Path(path)
     if p.is_symlink() or not p.is_file() or p.stat().st_mode & 0o077:
         raise InstallError('The input env file must be a regular private file (chmod 600)')
     values = env_read(p)
     if values.keys() - ALLOWED:
-        raise InstallError('Input env may contain only MINIMAX_API_KEY, MINIMAX_API_HOST and MINIMAX_MODEL')
+        raise InstallError('Unsupported provider env field; use the documented LLM/ASR/TTS/SEARCH fields')
+    overrides={'LLM_PROVIDER':provider,'LLM_BASE_URL':api_base,'LLM_API_TYPE':api_type}
+    for name,value in overrides.items():
+        if value is not None:
+            if values.get(name) and values[name]!=value:raise InstallError('CLI provider setting differs from the private env file')
+            values[name]=value
     if model:
-        if values.get('MINIMAX_MODEL') and values['MINIMAX_MODEL'] != model:
-            raise InstallError('CLI model differs from the private env file')
-        values['MINIMAX_MODEL'] = model
+        name='LLM_MODEL' if any(k.startswith('LLM_') for k in values) else 'MINIMAX_MODEL'
+        if values.get(name) and values[name]!=model:raise InstallError('CLI model differs from the private env file')
+        values[name]=model
     return provider_values(values)
 
 
 def provider_values(values):
-    if not values.get('MINIMAX_API_KEY') or values['MINIMAX_API_KEY'].startswith('replace-'):
-        raise InstallError('A real MiniMax API key must be supplied in the private env file')
-    host = values.get('MINIMAX_API_HOST', runtime_config.DEFAULTS['llm']['api_host'])
-    if host not in ('https://api.minimaxi.com', 'https://api.minimax.io'):
-        raise InstallError('Use an official MiniMax HTTPS API host')
-    if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._:/-]{0,159}', values.get('MINIMAX_MODEL','')):
-        raise InstallError('Provide your backend model name with MINIMAX_MODEL or --model')
-    if not re.fullmatch(r'[A-Za-z0-9_./:@+?%=-]+',values['MINIMAX_API_KEY']):
-        raise InstallError('Unsupported API key characters; do not quote or embed newlines')
-    values['MINIMAX_API_HOST'] = host
+    if not values.get('LLM_MODEL') and not values.get('MINIMAX_MODEL'):raise InstallError('Provide your actual backend model with LLM_MODEL or MINIMAX_MODEL')
+    try:
+        options=(CURRENT_LAYOUT or {}).get('options',runtime_config.DEFAULTS)['llm']
+        config=backend_config.text_config(values,options)
+        if not config.ready:raise ValueError('Provide the selected backend model and its own API key (local HTTP may omit a key)')
+        if config.key.startswith('replace-'):raise ValueError('Replace the placeholder backend API key')
+        for kind in ('ASR','TTS','SEARCH'):
+            service=backend_config.auxiliary(kind,config,values)
+            if service['provider']!='none' and not service['key'] and not service['base_url'].startswith('http://'):
+                raise ValueError('An enabled auxiliary service needs its own API key')
+            if values.get(kind+'_MODEL') and not backend_config.model_valid(values[kind+'_MODEL']):raise ValueError('invalid auxiliary model name')
+        if values.get('TTS_VOICE') and not runtime_config.voice_valid(values['TTS_VOICE']):raise ValueError('invalid TTS voice ID')
+    except ValueError as error:raise InstallError(str(error)) from None
+    # Keep existing private env names readable; new installations use generic ones.
+    if any(k.startswith('LLM_') for k in values):
+        values.update(LLM_PROVIDER=config.provider,LLM_API_TYPE=config.api_type,LLM_BASE_URL=config.base_url,LLM_MODEL=config.model,LLM_API_KEY=config.key)
+    else:
+        if not values.get('MINIMAX_MODEL'):raise InstallError('Provide your backend model name with LLM_MODEL or MINIMAX_MODEL')
+        values['MINIMAX_API_HOST']=config.base_url
     return values
+
+
+def private_args(args):
+    return private_input(args.env_file,getattr(args,'model',None),getattr(args,'provider',None),getattr(args,'api_base',None),getattr(args,'api_type',None))
 
 
 def is_ip(host):
@@ -194,7 +214,7 @@ def public_origin(host,port):
 def setup_values(args):
     if not sys.stdin.isatty():raise InstallError('--setup needs a terminal; agents should use --data-dir, --hostname and --env-file instead')
     if os.geteuid()!=0:raise InstallError('--setup requires sudo for system installation')
-    print('小溪安装向导：只需确认数据目录、访问地址、后端模型及 API Key。密钥不会显示。',file=sys.stderr)
+    print('小溪安装向导：确认数据目录、访问地址、对话服务与按需语音服务。密钥隐藏输入。',file=sys.stderr)
     def ask(title,default=''):
         print(title+((' ['+str(default)+']') if default else '')+': ',file=sys.stderr,end='',flush=True)
         value=input().strip()
@@ -206,10 +226,29 @@ def setup_values(args):
     if not inspect():raise InstallError('Fix the preflight requirements before entering a credential')
     if (BASE/'config/install.json').exists():return None
     if not hostname_valid(args.hostname):raise InstallError('Provide a valid DNS name or IP address')
-    if args.env_file:return private_input(args.env_file,args.model)
-    name=ask('你实际开通的 MiniMax 后端模型名称',args.model or runtime_config.DEFAULTS['llm']['model'])
-    key=getpass.getpass('该后端模型的 API Key（隐藏输入）: ',stream=sys.stderr)
-    return provider_values(dict(MINIMAX_MODEL=name,MINIMAX_API_KEY=key))
+    if args.env_file:return private_args(args)
+    provider=ask('对话服务商（'+', '.join(backend_config.PRESETS)+'）',getattr(args,'provider',None) or 'minimax')
+    if provider not in backend_config.PRESETS:raise InstallError('Unknown provider; select custom for another compatible service')
+    preset=backend_config.PRESETS[provider]
+    base=ask('API Base URL（确认套餐/地域，勿填聊天接口的完整路径）',getattr(args,'api_base',None) or preset['base_url'])
+    protocol=getattr(args,'api_type',None) or preset['api_type']
+    if provider=='custom':protocol=ask('接口类型（openai-chat / openai-responses / anthropic）',protocol)
+    name=ask('你实际开通/安装的后端模型名称',args.model or preset['suggested_model'])
+    key=getpass.getpass('对话 API Key（隐藏输入；无鉴权的本地服务可留空）: ',stream=sys.stderr)
+    values=dict(LLM_PROVIDER=provider,LLM_API_TYPE=protocol,LLM_BASE_URL=base,LLM_MODEL=name,LLM_API_KEY=key)
+    if provider!='minimax':
+        voice=ask('语音服务（none=稍后配置 / minimax / openai-compatible）','none')
+        values.update(ASR_PROVIDER=voice,TTS_PROVIDER=voice,SEARCH_PROVIDER='none')
+        if voice!='none':
+            default_base='https://api.minimaxi.com' if voice=='minimax' else 'https://api.openai.com/v1'
+            audio_base=ask('语音 API Base URL',default_base)
+            audio_key=getpass.getpass('语音 API Key（隐藏输入；地址相同可留空复用对话 Key）: ',stream=sys.stderr)
+            if not audio_key and backend_config.base_url(audio_base)==backend_config.base_url(base):audio_key=key
+            speech=runtime_config.DEFAULTS['speech'];prefix='openai_' if voice=='openai-compatible' else ''
+            asr=ask('语音识别模型名称',speech[prefix+'asr_model']);tts=ask('语音合成模型名称',speech[prefix+'tts_model'])
+            values.update(ASR_BASE_URL=audio_base,TTS_BASE_URL=audio_base,ASR_API_KEY=audio_key,TTS_API_KEY=audio_key,ASR_MODEL=asr,TTS_MODEL=tts)
+            values['TTS_VOICE']=ask('音色 ID',speech['openai_voice' if prefix else 'default_voice'])
+    return provider_values(values)
 
 
 def source_files():
@@ -219,7 +258,7 @@ def source_files():
                   and not p.name.startswith('test_') and '.private.' not in p.name
                   and 'experimental' not in p.parts
                   and (p.suffix in ('.py','.c','.h','.js','.html','.css')
-                       or p.name in ('runtime.defaults.json','LICENSE','LICENSE.txt','COPYRIGHT.Debian','AUTHORS','LOCAL_PATCHES.md')))
+                       or p.name in ('runtime.defaults.json','providers.defaults.json','LICENSE','LICENSE.txt','COPYRIGHT.Debian','AUTHORS','LOCAL_PATCHES.md')))
 
 
 def fingerprint():
@@ -351,7 +390,7 @@ def install(args):
     values=getattr(args,'provider_values',None)
     if values is None:
         if not args.env_file:raise InstallError('Use --setup for hidden key input, or provide --env-file and a model name')
-        values=private_input(args.env_file,getattr(args,'model',None))
+        values=private_args(args)
     if LOCATION.exists():raise InstallError('A registered installation already exists; inspect it rather than overwriting')
     for directory in (BASE,INSTALL,UNIT.parent,LOCATION.parent):
         if directory.exists() and not directory.is_dir():raise InstallError('Installation path conflicts with an existing file')
@@ -475,8 +514,11 @@ def main():
     parser.add_argument('--port',type=int,help='HTTPS port (default 8791 on first install)')
     parser.add_argument('--settings-file',type=Path,help='Optional JSON of non-secret runtime overrides; unknown fields are rejected')
     parser.add_argument('--task-user',help='Optional dedicated non-root task account name')
-    parser.add_argument('--model',help='Your backend model name, or set MINIMAX_MODEL in the env file')
-    parser.add_argument('--env-file',type=Path,help='Private chmod-600 MiniMax env input; never printed')
+    parser.add_argument('--provider',choices=tuple(backend_config.PRESETS),help='Backend provider preset; custom allows another compatible service')
+    parser.add_argument('--api-base',help='Operator-supplied provider API base URL')
+    parser.add_argument('--api-type',choices=backend_config.API_TYPES,help='API protocol, independently of model name')
+    parser.add_argument('--model',help='Actual backend model name; may also use LLM_MODEL in private env')
+    parser.add_argument('--env-file',type=Path,help='Private chmod-600 provider env input; never printed')
     parser.add_argument('--json',action='store_true',help='Emit a single machine-readable JSON report with stable step names')
     args=parser.parse_args(); code=0
     EVENTS.clear()
@@ -488,7 +530,7 @@ def main():
         elif args.doctor: code=doctor()
         elif not args.setup:
             code=0 if inspect() else 1
-            if args.env_file: private_input(args.env_file,args.model);event('private_input','passed')
+            if args.env_file: private_args(args);event('private_input','passed')
             if args.hostname and not hostname_valid(args.hostname): raise InstallError('Invalid actual DNS hostname')
             event('plan','read_only',command='sudo ./install.sh --setup', noninteractive='sudo ./install.sh --apply --data-dir YOUR_DATA_DIRECTORY --hostname YOUR_DNS_OR_IP --env-file /private/provider.env --json',
                   optional_desktop='See docs/DESKTOP.md; not installed by this brain bootstrap')

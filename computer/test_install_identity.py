@@ -14,11 +14,12 @@ class InstalledIdentityTests(unittest.TestCase):
             previous=Path.cwd()
             try:
                 os.chdir(root)
-                with patch.dict(os.environ,{'DESKPET_EXECUTOR_USER':account.pw_name,'MINIMAX_API_KEY':'test-key-'+'a'*32,'UNRELATED_CREDENTIAL':'test-key-'+'b'*32}):
+                with patch.dict(os.environ,{'DESKPET_EXECUTOR_USER':account.pw_name,'MINIMAX_API_KEY':'test-key-'+'a'*32,'UNRELATED_CREDENTIAL':'test-key-'+'b'*32,'LLM_API_KEY':'fixture-llm-key','ASR_API_KEY':'fixture-asr-key','TTS_API_KEY':'fixture-tts-key'}):
                     code,text=worker.command(job,"python3 -c 'import os,json; print(json.dumps(dict(uid=os.geteuid(),keys=sorted(os.environ))))'")
                 result=json.loads(text);self.assertEqual(code,0);self.assertEqual(result['uid'],account.pw_uid)
                 self.assertNotIn('MINIMAX_API_KEY',result['keys']);self.assertNotIn('UNRELATED_CREDENTIAL',result['keys'])
                 self.assertNotIn('DESKPET_COMPUTER_TOKEN',result['keys'])
+                for key in ('LLM_API_KEY','ASR_API_KEY','TTS_API_KEY'):self.assertNotIn(key,result['keys'])
             finally:os.chdir(previous);store.db.close()
 
 if __name__=='__main__':unittest.main()

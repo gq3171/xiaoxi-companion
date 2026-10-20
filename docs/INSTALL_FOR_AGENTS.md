@@ -6,10 +6,11 @@
 
 1. 用户要把小溪的数据放在哪里。接收用户真实目录/挂载点，**不要要求更名或挂载成固定名称**。输入挂载点时，安装器使用其 `xiaoxi` 专用子目录；检查输出显示最终 `data`、`storage_mount` 与 `separate_storage`。没有独立数据盘也可选择普通目录；由用户决定是否接受系统盘空间占用。
 2. 客户端访问的域名或局域网 IP；仅局域网不必购买域名。
-3. 用户**实际开通的后端模型名称**。
-4. 该服务的 **API Key**。当前实现为 MiniMax Messages + 语音/搜索适配，不能把其他厂商 Key 交给 MiniMax endpoint。
+3. 用户选择的服务商、**实际 API 模型名称**，确认 Base URL 与账号的地域/套餐匹配；预设地址不是套餐权益证明。自定义服务还需选择接口协议。
+4. 对应服务的 **API Key**；本机/内网无鉴权 HTTP 模型可留空。
+5. 是否启用语音；ASR、TTS、搜索各自配置服务商/地址/Key。不要把另一家的 Key 当通用凭据，也不要自动转付费备用服务。
 
-人类可执行 `sudo ./install.sh --setup` 交互输入，Key 使用隐藏输入。自动部署用仓库外 chmod-600 的 env 文件，至少有 `MINIMAX_MODEL`、`MINIMAX_API_KEY`，可选 `MINIMAX_API_HOST`。不要请用户把秘密贴进聊天，不要把 Key 放在命令参数或安装日志里，也不要 source/eval env 文件。
+人类可执行 `sudo ./install.sh --setup` 交互输入，Key 使用隐藏输入。自动部署用仓库外 chmod-600 的 env 文件，提供 `LLM_PROVIDER`、`LLM_MODEL`、`LLM_API_KEY`（本地可空），可选 `LLM_BASE_URL`、`LLM_API_TYPE`。参照 [MODELS.md](MODELS.md)，旧 MiniMax env 仍可读。不要请用户把秘密贴进聊天，不要把 Key 放在命令参数或安装日志里，也不要 source/eval env 文件。
 
 ## 执行流程
 
@@ -23,7 +24,7 @@ sudo ./install.sh --doctor --json
 
 检查步骤默认只读。依赖为 Debian/Ubuntu、Python >=3.11、systemd、aarch64/x86_64、至少 2 GiB 可用空间、支持 Unix 权限的数据目录。安装器自动安装缺失软件包、创建普通任务用户、编译 native 库/生成资源、生成独立随机 Token、CA/服务器证书、按路径生成 systemd 并启动主脑。
 
-高级选项仅在需要时使用：`--port`、`--install-dir`、`--require-mount`、`--task-user`、`--settings-file`。配置完整列表见 [CONFIGURATION.md](CONFIGURATION.md)。不要把默认参数变成一份让用户逐项填的表。
+高级选项仅在需要时使用：`--port`、`--install-dir`、`--require-mount`、`--task-user`、`--settings-file`、`--provider`、`--api-base`、`--api-type`、`--model`。配置完整列表见 [CONFIGURATION.md](CONFIGURATION.md)。不要把默认参数变成一份让用户逐项填的表。
 
 ## 自动发现和不覆盖规则
 
