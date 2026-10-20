@@ -34,7 +34,7 @@ static bool terminal(const char *s)
 }
 static bool busy(void)
 {
-    return s_job&&!terminal(text(s_job,"state"));
+    return s_job&&(!terminal(text(s_job,"state"))||text(s_job,"pending_note")[0]||cJSON_IsTrue(cJSON_GetObjectItem(s_job,"cancel_requested")));
 }
 static bool input_pending(const cJSON *job)
 {
@@ -112,26 +112,43 @@ int pet_computer_queue_from(const char *goal,const char *original)
 int pet_computer_queue(const char *goal){return pet_computer_queue_from(goal,NULL);}
 int pet_computer_note_id(const char *note,const char *id)
 {
-    if(!s_job||!s_writable||!note||!note[0]||strlen(note)>1024||!id_ok(id)||text(s_job,"pending_note")[0]||
-       (terminal(text(s_job,"state"))&&strcmp(text(s_job,"state"),"interrupted")))return -1;
-    cJSON *next=cJSON_Duplicate(s_job,true);
+    return pet_computer_note_target_id(note,id,NULL);
+}
+int pet_computer_note_target_id(const char *note,const char *id,const char *target)
+{
+    if(cJSON_IsTrue(cJSON_GetObjectItem(s_job,"cancel_requested")))return -1;
+    if(!s_writable||!note||!note[0]||strlen(note)>1024||!id_ok(id)||text(s_job,"pending_note")[0]||
+       (target&&target[0]&&!id_ok(target)))return -1;
+    const char *job=target&&target[0]?target:text(s_job,"job_id");
+    if(!id_ok(job))return -1;
+    if((!target||!target[0])&&terminal(text(s_job,"state"))&&strcmp(text(s_job,"state"),"interrupted"))return -1;
+    cJSON *next=s_job?cJSON_Duplicate(s_job,true):cJSON_CreateObject();
+    if(!s_job){cJSON_AddStringToObject(next,"job_id",job);cJSON_AddStringToObject(next,"goal","核对远程任务");cJSON_AddStringToObject(next,"state","interrupted");}
+    cJSON_DeleteItemFromObject(next,"control_target");cJSON_AddStringToObject(next,"control_target",job);
     cJSON_DeleteItemFromObject(next,"pending_note");cJSON_DeleteItemFromObject(next,"note_id");
     cJSON_AddStringToObject(next,"pending_note",note);cJSON_AddStringToObject(next,"note_id",id);
     int result=save(next);if(!result)s_poll_at=0;return result;
 }
-int pet_computer_note(const char *note)
+int pet_computer_note(const char *note){return pet_computer_note_target(note,NULL);}
+int pet_computer_note_target(const char *note,const char *target)
 {
 #ifdef ESP_PLATFORM
     char id[33];snprintf(id,sizeof(id),"%08x%08x%08x%08x",(unsigned)esp_random(),(unsigned)esp_random(),(unsigned)esp_random(),(unsigned)esp_random());
-    return pet_computer_note_id(note,id);
+    return pet_computer_note_target_id(note,id,target);
 #else
-    (void)note;return -1;
+    (void)note;(void)target;return -1;
 #endif
 }
-int pet_computer_cancel(void)
+int pet_computer_cancel(void){return pet_computer_cancel_target(NULL);}
+int pet_computer_cancel_target(const char *target)
 {
-    if((!busy()&&strcmp(text(s_job,"state"),"blocked"))||!s_writable)return -1;
-    cJSON *next=cJSON_Duplicate(s_job,true);if(!next)return -1;
+    if(!s_writable||(target&&target[0]&&!id_ok(target)))return -1;
+    const char *job=target&&target[0]?target:text(s_job,"job_id");
+    if(text(s_job,"pending_note")[0]&&strcmp(job,text(s_job,"control_target")))return -1;
+    if(!id_ok(job)||((!target||!target[0])&&!busy()&&strcmp(text(s_job,"state"),"blocked")&&strcmp(text(s_job,"state"),"interrupted")))return -1;
+    cJSON *next=s_job?cJSON_Duplicate(s_job,true):cJSON_CreateObject();if(!next)return -1;
+    if(!s_job){cJSON_AddStringToObject(next,"job_id",job);cJSON_AddStringToObject(next,"goal","核对远程任务");cJSON_AddStringToObject(next,"state","interrupted");}
+    cJSON_DeleteItemFromObject(next,"control_target");cJSON_AddStringToObject(next,"control_target",job);
     /* A lost reply may hide a running job. Reconcile cancellation remotely. */
     cJSON_DeleteItemFromObjectCaseSensitive(next,"cancel_requested");
     cJSON_AddBoolToObject(next,"cancel_requested",true);
@@ -184,13 +201,14 @@ void pet_computer_tick(uint32_t now,bool interactive)
     bool cancel_waiting=cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(s_job,"cancel_requested"));
     const char *operation=!s_job?"health":
         cancel_waiting?"cancel":
+        text(s_job,"pending_note")[0]&&(strcmp(text(s_job,"state"),"pending")||strcmp(text(s_job,"control_target"),text(s_job,"job_id")))?"update":
         !strcmp(text(s_job,"state"),"pending")?(text(s_job,"resume_of")[0]?"resume":"submit"):
-        text(s_job,"pending_note")[0]?"update":!busy()?"health":"status";
+        !busy()?"health":"status";
     if(!strcmp(operation,"health")){pet_computer_check_connection(now);return;}
     cJSON *request=cJSON_CreateObject();
     cJSON_AddNumberToObject(request,"client_version",3);
     if(strcmp(operation,"health")){
-        cJSON_AddStringToObject(request,"job_id",!strcmp(operation,"resume")?text(s_job,"resume_of"):text(s_job,"job_id"));
+        cJSON_AddStringToObject(request,"job_id",(!strcmp(operation,"cancel")||!strcmp(operation,"update"))&&id_ok(text(s_job,"control_target"))?text(s_job,"control_target"):!strcmp(operation,"resume")?text(s_job,"resume_of"):text(s_job,"job_id"));
         if(!strcmp(operation,"resume"))cJSON_AddStringToObject(request,"resume_id",text(s_job,"job_id"));
         if(!strcmp(operation,"submit")){
             cJSON_AddStringToObject(request,"goal",text(s_job,"goal"));
@@ -220,21 +238,23 @@ void pet_computer_tick(uint32_t now,bool interactive)
     const char *state=text(response,"state"),*message=text(response,"message");
     const char *received_id=text(response,"job_id");
     bool resumed_original=!strcmp(operation,"resume")&&!strcmp(received_id,text(s_job,"resume_of"));
-    bool valid=ok&&(!strcmp(received_id,text(s_job,"job_id"))||resumed_original)&&
+    bool controlled=(!strcmp(operation,"cancel")||!strcmp(operation,"update"))&&id_ok(text(s_job,"control_target"));
+    bool valid=ok&&(controlled?!strcmp(received_id,text(s_job,"control_target")):(!strcmp(received_id,text(s_job,"job_id"))||resumed_original))&&
         (!strcmp(state,"queued")||!strcmp(state,"running")||terminal(state))&&strlen(message)<=1024;
     if(!valid){s_reachable=false;s_poll_at=now+30000;pet_home_computer_event(PET_COMPUTER_ERROR);cJSON_Delete(response);return;}
     s_reachable=true;
     /* Speech is a separate, bounded view. Full reports remain on RK. */
     const char *spoken=text(response,"spoken_message");
     if(spoken[0]&&strlen(spoken)<=240)message=spoken;
-    const char *goal=text(response,"goal");if(!goal[0]||strlen(goal)>1024)goal=text(s_job,"goal");
+    const char *goal=text(response,"goal");if(!goal[0]||strlen(goal)>1024)goal=strcmp(received_id,text(s_job,"job_id"))?"核对远程任务":text(s_job,"goal");
     bool has_media=cJSON_IsTrue(cJSON_GetObjectItem(response,"auto_preview"));
     const char *input_id=text(response,"input_request_id");if(!id_ok(input_id))input_id="";
-    if(resumed_original||!strcmp(operation,"update")||strcmp(state,text(s_job,"state"))||strcmp(message,text(s_job,"message"))||strcmp(goal,text(s_job,"goal"))||has_media!=cJSON_IsTrue(cJSON_GetObjectItem(s_job,"auto_preview"))||strcmp(input_id,text(s_job,"input_request_id"))){
+    if(controlled||resumed_original||!strcmp(operation,"update")||strcmp(state,text(s_job,"state"))||strcmp(message,text(s_job,"message"))||strcmp(goal,text(s_job,"goal"))||has_media!=cJSON_IsTrue(cJSON_GetObjectItem(s_job,"auto_preview"))||strcmp(input_id,text(s_job,"input_request_id"))){
         cJSON *next=cJSON_CreateObject();cJSON_AddStringToObject(next,"job_id",received_id);
         cJSON_AddStringToObject(next,"goal",goal);cJSON_AddStringToObject(next,"state",state);
         if(strcmp(operation,"update")&&strcmp(operation,"cancel")&&text(s_job,"pending_note")[0]){
             cJSON_AddStringToObject(next,"pending_note",text(s_job,"pending_note"));cJSON_AddStringToObject(next,"note_id",text(s_job,"note_id"));
+            if(id_ok(text(s_job,"control_target")))cJSON_AddStringToObject(next,"control_target",text(s_job,"control_target"));
         }
         if(text(s_job,"resume_of")[0])cJSON_AddStringToObject(next,"resume_of",text(s_job,"resume_of"));
         cJSON_AddStringToObject(next,"message",message);
@@ -242,7 +262,7 @@ void pet_computer_tick(uint32_t now,bool interactive)
         if(input_id[0])cJSON_AddStringToObject(next,"input_request_id",input_id);
         if(!strcmp(state,"succeeded")&&has_media&&cJSON_IsTrue(cJSON_GetObjectItem(s_job,"media_presented")))
             cJSON_AddStringToObject(next,"reported_state","succeeded");
-        if(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(s_job,"cancel_requested"))&&!terminal(state))cJSON_AddBoolToObject(next,"cancel_requested",true);
+        if(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(s_job,"cancel_requested"))&&strcmp(state,"cancelled")&&strcmp(state,"succeeded")&&strcmp(state,"failed"))cJSON_AddBoolToObject(next,"cancel_requested",true);
         if(save(next)!=0){pet_home_computer_event(PET_COMPUTER_ERROR);cJSON_Delete(response);return;}
     }
     pet_home_computer_event(!strcmp(state,"running")?PET_COMPUTER_RUNNING:

@@ -240,3 +240,41 @@ int main(void){
  return 0;}
 ''')
 
+
+    def test_interrupted_cancel_and_remote_targets_survive_reboot(self):
+        self.run_computer(r'''
+int main(void){
+ assert(!pet_computer_start());assert(!pet_computer_submit("synthetic",server_id));
+ server_state="interrupted";pet_computer_tick(100,false);assert(!pet_computer_cancel());
+ assert(!pet_computer_start());server_state="cancelled";pet_computer_tick(200,false);
+ assert(!strcmp(operation,"cancel")&&!strcmp(text(s_job,"state"),"cancelled"));
+ const char *remote="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+ assert(!pet_computer_cancel_target(remote));assert(!pet_computer_start());
+ server_id=remote;pet_computer_tick(300,false);
+ assert(!strcmp(submitted_id,remote)&&!strcmp(text(s_job,"job_id"),remote));
+ return 0;}
+''')
+
+    def test_remote_amendment_keeps_explicit_target_and_operation_id(self):
+        self.run_computer(r'''
+int main(void){
+ assert(!pet_computer_start());
+ const char *remote="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+ assert(!pet_computer_note_target_id("owner correction","cccccccccccccccccccccccccccccccc",remote));
+ assert(!pet_computer_start());assert(!strcmp(text(s_job,"note_id"),"cccccccccccccccccccccccccccccccc"));
+ server_id=remote;server_state="interrupted";pet_computer_tick(100,false);
+ assert(!strcmp(operation,"update")&&!strcmp(submitted_id,remote));
+ assert(!text(s_job,"pending_note")[0]&&!strcmp(text(s_job,"state"),"interrupted"));
+ return 0;}
+''')
+
+    def test_unconfirmed_cancel_of_interrupted_task_keeps_retrying(self):
+        self.run_computer(r'''
+int main(void){
+ assert(!pet_computer_start());assert(!pet_computer_submit("synthetic",server_id));
+ server_state="interrupted";pet_computer_tick(100,false);assert(!pet_computer_cancel());
+ assert(pet_computer_submit("must not replace pending cancel","bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")<0);
+ pet_computer_tick(200,false);assert(cJSON_IsTrue(cJSON_GetObjectItem(s_job,"cancel_requested")));
+ assert(!pet_computer_start());server_state="cancelled";pet_computer_tick(300,false);
+ assert(!strcmp(operation,"cancel")&&!busy());return 0;}
+''')

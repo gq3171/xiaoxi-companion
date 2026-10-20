@@ -28,7 +28,7 @@ def select(store,job=None,history=False,focus=None):
             doc=store.tasks.snapshot(item['id'])
             active=item['state'] in ('queued','running','interrupted')
             blocker=item['message'] if active and item['phase'] in ('waiting_user','needs_verification','interrupted') else ''
-            item.update(next_step=doc['next_step'][:200] if active else '',blocker=blocker,verified_checks=len(doc['verified_facts']),input_revision=doc['input_revision'])
+            item.update(next_step=doc['next_step'][:200] if active else '',blocker=blocker,verified_checks=sum(f.get('input_revision')==doc['input_revision'] for f in doc['verified_facts']),input_revision=doc['input_revision'])
             from private_input import attention
             if attention(store,item['id']):item['phase']='waiting_user';item['blocker']='需要主人在网站专用私密填写窗补充信息。'
             item['label']=LABELS.get(item['phase'],LABELS.get(item['state'],'状态待核对'))

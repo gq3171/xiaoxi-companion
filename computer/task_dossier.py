@@ -93,13 +93,13 @@ class TaskDossiers:
             if current is None:raise ValueError('missing task')
             current.update(updates);self._save(job,current)
 
-    def outcome(self,job,ordinal,action,code,summary,verified=False):
+    def outcome(self,job,ordinal,action,code,summary,verified=False,revision=None):
         # Callers pass already-redacted evidence, never private field values.
         summary=str(summary).encode()[:512].decode('utf-8','ignore')
         with self.store.lock,self.store.db:
             current=self.snapshot(job)
             if current is None:return
-            fact=dict(step=ordinal,action=action,exit_code=code,summary=summary,
+            fact=dict(step=ordinal,action=action,exit_code=code,summary=summary,input_revision=current['input_revision'] if revision is None else revision,
                       evidence_sha256=hashlib.sha256(summary.encode()).hexdigest())
             current['recent_outcomes']=(current['recent_outcomes']+[fact])[-12:]
             if verified:current['verified_facts']=(current['verified_facts']+[fact])[-32:]

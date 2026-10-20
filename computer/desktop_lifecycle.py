@@ -20,8 +20,17 @@ def authorize_shutdown(store,job,quote):
     # substring which could remove a negation. This is capability authorization,
     # not task routing; the model still chooses and plans the tool action.
     if not isinstance(quote,str) or quote not in sources:raise ValueError('关闭整个浏览器需要引用主人原始要求')
-    if re.search(r'不要|别关|别退|不必|不用|不能|不要执行|do not|don.t|never',quote,re.I):
-        raise ValueError('这句话没有授权关闭整个浏览器')
+    clauses=re.split(r'[，,。；;！!？?]|\b(?:but|then)\b',quote,flags=re.I)
+    authorized=False
+    for clause in clauses:
+        if not re.search(r'浏览器|\bbrowser\b',clause,re.I):continue
+        if re.search(r'不要|别|不必|不用|不能|do not|don.t|never',clause,re.I):continue
+        if re.search(r'关闭|关掉|关了|退出|结束|close|quit|exit|shut down',clause,re.I):authorized=True
+    for source in sources[sources.index(quote)+1:]:
+        for clause in re.split(r'[，,。；;！!？?]',source):
+            if re.search(r'浏览器|\bbrowser\b',clause,re.I) and re.search(r'不要|别|不必|不用|不能|do not|don.t|never',clause,re.I):
+                raise ValueError('主人后续要求保留浏览器，旧关闭授权已失效')
+    if not authorized:raise ValueError('这句话没有授权关闭整个浏览器')
     if not re.search(r'(关闭|关掉|关了|退出|结束).{0,24}浏览器|浏览器.{0,24}(关闭|关掉|关了|退出|结束)|(?:close|quit|exit|shut down)\b.{0,40}\bbrowser\b',quote,re.I):
         raise ValueError('这句话没有授权关闭整个浏览器')
 

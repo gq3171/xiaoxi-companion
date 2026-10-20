@@ -7,13 +7,14 @@ from desktop_browser import DesktopBrowser
 from desktop_jobs import broker,DesktopBusy
 from private_input import inputs,wipe
 
-ACTIONS={'browser_open','browser_tabs','browser_snapshot','browser_click','browser_type','browser_key','browser_scroll','browser_check','browser_screenshot','browser_close','browser_look','browser_visual_click','browser_session_status','browser_shutdown','handoff'}
-MUTATIONS={'browser_open','browser_click','browser_type','browser_key','browser_scroll','browser_close','browser_visual_click','browser_shutdown'}
+ACTIONS={'browser_open','browser_tabs','browser_snapshot','browser_click','browser_type','browser_key','browser_scroll','browser_check','browser_screenshot','browser_close','browser_look','browser_visual_click','browser_session_status','browser_shutdown','handoff','workspace_write','workspace_check','workspace_preview'}
+MUTATIONS={'browser_open','browser_click','browser_type','browser_key','browser_scroll','browser_close','browser_visual_click','browser_shutdown','workspace_write','workspace_preview'}
 def requires_browser(goal):return bool(re.search(r'浏览器|网页交互|注册|表单|登录|填写.{0,8}网站|点击.{0,8}网页',goal,re.I))
 
-def run_desktop(worker,job,messages=None,first=None,ordinal=1,checked=False,last_code=None):
+def run_desktop(worker,job,messages=None,first=None,ordinal=1,checked=False,last_code=None,first_revision=None,verified_revision=None):
     store=worker.store;job_id=job['id'];state=broker(store);private=inputs(store);saved=state.load(job_id)
-    workspace=store.path.parent.parent/'work/browser'/job_id;workspace.mkdir(parents=True,exist_ok=True,mode=0o700)
+    workspace=worker.workspace(job_id) if hasattr(worker,'workspace') else store.path.parent.parent/'work/browser'/job_id
+    workspace.mkdir(parents=True,exist_ok=True,mode=0o700)
     browser=DesktopBrowser(store,job_id,workspace,lambda:worker.cancelled(job_id));worker.active_job_id=job_id
     if saved:
         messages=saved['messages'];first=None;checked=False;last_code=None
@@ -70,14 +71,35 @@ def run_desktop(worker,job,messages=None,first=None,ordinal=1,checked=False,last
         return success
     def stopped():
         status='interrupted' if worker.stop.is_set() else 'cancelled';store.update(job_id,status,'桌面任务已停止，页面和进度保留，未重复提交。');state.phase(job_id,'interrupted' if status=='interrupted' else 'done')
+    recovery_revision=store.tasks.revision(job_id)
     try:
         if saved and (session_closed or pending_effect and pending_effect.get('action')=='browser_shutdown'):
             # No page exists after browser shutdown. Verify the passive session
             # state without restore()/ensure(), which could reopen Chromium.
             value=BrowserSession().status();observe(value)
-            if value['closed']:pending_effect=None;checked=True;last_code=0;session_closed=True
+            if value['closed']:
+                session_closed=True
+                if not pending_effect or pending_effect.get('action') in ('browser_shutdown','browser_close'):
+                    pending_effect=None;checked=True;last_code=0;verified_revision=recovery_revision
         elif saved:
-            browser.restore(saved.get('browser'))
+            restored=saved.get('browser')
+            if pending_effect and pending_effect.get('action')=='browser_close' and pending_effect.get('tab'):
+                target=pending_effect['tab']
+                actual=BrowserSession().status()
+                if actual['closed']:
+                    present=False;session_closed=True
+                else:
+                    browser.ensure()
+                    present=any(x.get('targetId')==target for x in browser.control.call('Target.getTargets').get('targetInfos',[]))
+                observe(dict(scope='task_owned_target',tab=target,closed=not present,verification='task_target_absent' if not present else None))
+                pending_effect=None
+                if not present:
+                    checked=True;last_code=0;verified_revision=recovery_revision
+                    restored=dict(restored or {})
+                    restored['tabs']=[x for x in restored.get('tabs',[]) if x!=target]
+                    restored['owned']=[x for x in restored.get('owned',[]) if x!=target]
+                    if restored.get('current')==target:restored['current']=next(iter(restored['tabs']),None)
+            browser.restore(restored)
             if browser.tabs:
                 value=browser.snapshot();observe(value)
                 if pending_effect:pending_effect['observed']=True
@@ -106,6 +128,8 @@ def run_desktop(worker,job,messages=None,first=None,ordinal=1,checked=False,last
                 messages.append({'role':'user','content':'主人已交回桌面。重新核对页面，继续原任务；接管前未发出的操作全部作废。'})
                 state.phase(job_id,'running')
             revision=store.tasks.revision(job_id)
+            if first is not None and first_revision != revision:first=None
+            worker.task_revision=revision
             dossier={'role':'user','content':json.dumps(store.tasks.context(job_id),ensure_ascii=False)}
             ephemeral=messages[:1]+[dossier]+messages[1:]+([pending_image] if pending_image else [])
             try:reply=first if first is not None else worker.model(ephemeral)
@@ -129,9 +153,11 @@ def run_desktop(worker,job,messages=None,first=None,ordinal=1,checked=False,last
                 if pending_effect:
                     if status=='succeeded':observe({'error':'有一步结果尚未核对，先重新观察并browser_check，不能宣称完成。'});continue
                     checkpoint(phase='interrupted');store.update(job_id,'interrupted','有一步操作结果尚未核对，未自动重发。');state.phase(job_id,'interrupted');return
-                if status=='succeeded' and (not checked or last_code!=0):
+                if status=='succeeded' and (not checked or last_code!=0 or verified_revision!=revision):
                     observe({'error':'尚未通过当前实际页面的验证，请browser_check核对，不能假报成功。'});continue
-                checkpoint();store.update(job_id,status,str(reply.get('message') or '当前任务已结束。'));state.phase(job_id,'done');return
+                checkpoint()
+                if not store.update(job_id,status,str(reply.get('message') or '当前任务已结束。'),expected_revision=revision):continue
+                state.phase(job_id,'done');return
             if action not in ACTIONS and action not in ('run','check'):raise ValueError('unknown desktop task action')
             if action=='browser_close' and (tab or browser.current) not in browser.tabs:
                 # This is a known pre-dispatch scope error, not a lost close
@@ -149,7 +175,12 @@ def run_desktop(worker,job,messages=None,first=None,ordinal=1,checked=False,last
                     checkpoint(phase='interrupted');store.update(job_id,'interrupted','关闭整个浏览器缺少明确的主人原始授权，未执行关闭。');state.phase(job_id,'interrupted');return
             if pending_effect and action in MUTATIONS:
                 observe({'error':'前一步可能已经生效。只能先browser_snapshot，再browser_check核对具体当前结果；未重复操作。'});continue
-            if action in MUTATIONS:pending_effect=dict(step=ordinal,action=action,observed=False)
+            if action in MUTATIONS:
+                pending_effect=dict(step=ordinal,action=action,observed=False)
+                if action=='browser_close':pending_effect['tab']=tab or browser.current
+                if action=='workspace_write':
+                    import hashlib
+                    pending_effect.update(name=reply.get('name'),sha256=hashlib.sha256(str(reply.get('text','')).encode()).hexdigest())
             checkpoint();result={};code=0;passed=False
             try:
                 with state.action(job_id,revision):
@@ -175,11 +206,21 @@ def run_desktop(worker,job,messages=None,first=None,ordinal=1,checked=False,last
                             else:pending_effect=None
                     elif action=='browser_shutdown':
                         result=BrowserSession().shutdown(lambda:worker.cancelled(job_id));passed=result['closed'];code=0 if passed else 1;session_closed=passed
+                    elif action in ('workspace_write','workspace_check'):
+                        from workspace_tools import action as file_action
+                        result=file_action(workspace,reply);passed=result.get('passed') is True
+                        if action=='workspace_check' and not passed:code=1
+                    elif action=='workspace_preview':
+                        from workspace_tools import read
+                        result=browser.preview_text(read(workspace,reply.get('name')).decode('utf8'))
                     elif action in ('run','check'):
                         # Do not grant arbitrary shell execution in the GUI path.
-                        result={'error':'网页任务请使用浏览器工具操作和验证；不能用命令绕过密码、条款或人工验证。'};code=1
+                        result={'error':'混合任务的文件步骤用workspace_write/check/preview；网页步骤用浏览器工具。不能用任意命令绕过密码、条款或人工验证。'};code=1
                     if result.get('needs_human'):raise BrowserBlocked(result.get('blocked_reason','请在桌面完成当前验证。'))
                 if action in MUTATIONS:pending_effect=None
+                elif action=='workspace_check' and passed and pending_effect and pending_effect.get('action')=='workspace_write':
+                    if reply.get('name')==pending_effect.get('name') and result.get('sha256')==pending_effect.get('sha256'):pending_effect=None
+                    else:passed=False;code=1
                 elif action=='browser_snapshot' and pending_effect:pending_effect['observed']=True
                 elif action=='browser_check' and passed and pending_effect:
                     if pending_effect.get('observed'):pending_effect=None
@@ -203,13 +244,13 @@ def run_desktop(worker,job,messages=None,first=None,ordinal=1,checked=False,last
                 checked=False
                 if action!='browser_shutdown':session_closed=False
                 if hasattr(browser,'visual_clear'):browser.visual_clear()
-            if passed:checked=True
+            if passed:checked=True;verified_revision=revision
             last_code=code
             # Ordinary form values may be task data; credentials never reach this path.
             command=redact(json.dumps(browser.private_redact(reply) if hasattr(browser,'private_redact') else reply,ensure_ascii=False));output=redact(json.dumps(browser.private_redact(result) if hasattr(browser,'private_redact') else result,ensure_ascii=False))
             if worker.key:command=command.replace(worker.key,'[服务凭据已隐藏]');output=output.replace(worker.key,'[服务凭据已隐藏]')
             store.record(job_id,ordinal,str(action),command,code,output);ordinal+=1
-            store.tasks.outcome(job_id,ordinal-1,str(action),code,output,passed)
+            store.tasks.outcome(job_id,ordinal-1,str(action),code,output,passed,revision=revision)
             messages.append({'role':'assistant','content':command});observe(result);checkpoint()
             if progress.stalled(action,json.loads(output),code,action in MUTATIONS,passed):
                 checkpoint(phase='interrupted');store.update(job_id,'interrupted','连续核对未获得新进展，已暂停无效重试。现有页面和待核对结果保留，需要修正工具或补充要求后再继续。');state.phase(job_id,'interrupted');return

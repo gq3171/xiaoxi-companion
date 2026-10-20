@@ -188,9 +188,12 @@ class HomeChat:
             from task_control import control
             note=answer.get('task_note',candidate if action=='computer_update' else '')
             if not isinstance(note,str) or (note and note not in candidate):raise ValueError('owner amendment must quote the current request')
+            # Preserve the whole authenticated input: a model-selected substring
+            # could otherwise remove a negation and fabricate an authorization.
+            if note or action=='computer_update':note=candidate
             try:
                 job=control(self.computer,action,op_id(turn,'task-control'),note,answer.get('job_id'),request.get('_focus_job'),lambda:store.live(request))
-                say='补充要求已记在原任务里，我会按当前页面继续核对。' if note else '好，接着原来的任务，先核对当前实际进度。'
+                say=('补充要求已经保存；原命令的结果还需要核对，任务仍暂停，没有重做。' if job['state']=='interrupted' else '补充要求已记在原任务里，我会按当前进度继续核对。') if note else '好，接着原来的任务，先核对当前实际进度。'
             except ValueError as error:
                 say=str(error) if str(error).startswith(('没有找到','这项任务','命令任务','请先交回')) else '这次没有恢复任务，请先核对任务状态；私密信息请用专用填写窗。'
         elif action=='computer_cancel':

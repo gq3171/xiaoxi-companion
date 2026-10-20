@@ -130,6 +130,8 @@ class DesktopJobs:
     @contextlib.contextmanager
     def action(self,job,revision=None):
         with self.condition:
+            row=self.store.get(job)
+            if not row or row['cancel'] or row['state']!='running':raise DesktopBusy('任务已停止，旧动作未发出')
             if self.waiting(job):raise DesktopBusy('桌面正在等待主人处理')
             if revision is not None and revision!=self.store.tasks.revision(job):raise DesktopBusy('主人已补充要求，旧动作未发出')
             self.inflight=True

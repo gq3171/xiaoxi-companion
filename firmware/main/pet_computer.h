@@ -13,6 +13,9 @@ int pet_computer_queue_from(const char *goal,const char *original);
 int pet_computer_note(const char *note);
 int pet_computer_note_id(const char *note,const char *id);
 int pet_computer_cancel(void);
+int pet_computer_cancel_target(const char *job_id);
+int pet_computer_note_target_id(const char *note,const char *id,const char *job_id);
+int pet_computer_note_target(const char *note,const char *job_id);
 /* Explicit continuation creates a new durable request ID; never replays old work. */
 int pet_computer_resume(const char *parent_id);
 int pet_computer_resume_id(const char *parent_id,const char *new_id);

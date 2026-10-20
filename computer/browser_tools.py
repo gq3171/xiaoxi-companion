@@ -141,6 +141,20 @@ class Browser:
         # Do not wait for every ad/resource; a following snapshot observes readiness.
         return dict(tab=tab,navigation_requested=True,verification=False)
 
+    def preview_text(self,text):
+        # An opaque data origin and escaped preformatted text: local HTML is
+        # displayed as source, never executable code with host/file privileges.
+        import html
+        if not isinstance(text,str) or len(text.encode())>65536:raise ValueError('preview text budget')
+        self.ensure()
+        if len(self.tabs)>=3:raise BrowserUnavailable('本任务最多三个标签')
+        info=self.json_request('/json/new?about:blank','PUT');tab=info['id']
+        page=CDP(info['webSocketDebuggerUrl'],self.cancelled);self.tabs[tab]=page;self.current=tab;self.owned_targets.add(tab)
+        page.call('Page.enable');page.call('Accessibility.enable')
+        content='<meta charset="utf-8"><title>任务文件预览</title><pre>'+html.escape(text)+'</pre>'
+        page.call('Page.navigate',dict(url='data:text/html;base64,'+base64.b64encode(content.encode()).decode()))
+        return dict(tab=tab,navigation_requested=True,verification=False,scope='task_artifact_preview')
+
     def snapshot(self, tab=None):
         page=self.page(tab);tab=self.current
         before=self.document(page)
@@ -286,11 +300,20 @@ class Browser:
     def close_tab(self, tab=None):
         tab=tab or self.current
         if tab not in self.tabs:raise ValueError('不是本任务标签')
-        page=self.tabs.pop(tab);page.close();self.snapshots.pop(tab,None)
-        try:self.json_request('/json/close/'+tab,cleanup=True)
-        except Exception:pass
+        if self.cancelled():raise BrowserCancelled('任务已停止')
+        if not self.control:raise BrowserUnavailable('浏览器连接未就绪，标签关闭结果未确认')
+        try:self.control.call('Target.closeTarget',dict(targetId=tab))
+        except BrowserCancelled:raise
+        except Exception:pass # Lost acknowledgement: only fresh target evidence counts.
+        deadline=time.monotonic()+3
+        while True:
+            targets=self.control.call('Target.getTargets').get('targetInfos',[])
+            if all(item.get('targetId')!=tab for item in targets):break
+            if time.monotonic()>=deadline:raise BrowserUnavailable('标签仍存在，关闭结果未确认')
+            time.sleep(.1)
+        page=self.tabs.pop(tab);page.close();self.snapshots.pop(tab,None);self.owned_targets.discard(tab)
         self.current=next(iter(self.tabs),None)
-        return dict(closed=True)
+        return dict(closed=True,verification='task_target_absent',tab=tab)
 
     def close(self):
         # Popups opened by owned pages are part of this task as well.
@@ -306,7 +329,9 @@ class Browser:
                     except Exception:pass
             except Exception:pass
         for tab in list(self.tabs):
-            try:self.close_tab(tab)
+            try:self.json_request('/json/close/'+tab,cleanup=True)
+            except Exception:pass
+            try:self.tabs[tab].close()
             except Exception:pass
         self.tabs.clear();self.snapshots.clear();self.owned_targets.clear()
         if self.control:
