@@ -246,9 +246,17 @@ def for_store(store,brain=None):
         world=_instances[key]
         if brain is not None:
             def identity_name():
-                with brain.store.lock:
+                # Room snapshots hold world.lock. Web memory commits hold the
+                # brain lock and recheck authorization under world.lock. Never
+                # wait for the brain here: keep the last committed display name
+                # during a write, then refresh it on the next room snapshot.
+                if not brain.store.lock.acquire(blocking=False):
+                    return None
+                try:
                     row=brain.store.row()
                     return json.loads(row['identity']).get('name') if row else None
+                finally:
+                    brain.store.lock.release()
             with world.lock:
                 world.identity_provider=identity_name;world.refresh_name()
         if world.desktop is None:

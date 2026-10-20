@@ -50,6 +50,69 @@ class HomeChatTests(unittest.TestCase):
             if rows and rows[-1]['state']!='working':return rows[-1]
             time.sleep(.01)
         self.fail('web chat did not finish')
+    def test_room_snapshot_does_not_wait_for_brain_write_and_refreshes_name_later(self):
+        # A web receipt holds the brain lock while rechecking room authorization.
+        # Concurrent room snapshots must never wait for that lock in reverse.
+        key=str(self.computer.media.root.resolve())
+        previous=home._instances.get(key)
+        home._instances[key]=self.world
+        self.world.desktop=object()
+        finished=threading.Event();result=[];errors=[]
+        def snapshot():
+            try:result.append(self.world.snapshot())
+            except Exception as error:errors.append(error)
+            finally:finished.set()
+        worker=None
+        try:
+            home.for_store(self.computer,self.brain)
+            self.assertEqual(self.world.snapshot()['name'],'小溪')
+            with self.memory.lock:
+                with self.memory.db:
+                    self.memory.db.execute('UPDATE device SET identity=?',('{"name":"溪溪"}',))
+                worker=threading.Thread(target=snapshot,daemon=True);worker.start()
+                completed_while_brain_busy=finished.wait(1)
+                # Exercise the same authorization recheck only if the room lock
+                # is available; never leave an intentionally deadlocked fixture.
+                if completed_while_brain_busy:
+                    facade,request=self.chat.envelope(self.session,'c'*32)
+                    self.assertTrue(facade.admit(request))
+            worker.join(2)
+            self.assertTrue(completed_while_brain_busy,'room snapshot blocked on brain write lock')
+            self.assertFalse(worker.is_alive());self.assertFalse(errors)
+            self.assertEqual(result[0]['name'],'小溪')
+            self.assertEqual(self.world.snapshot()['name'],'溪溪')
+        finally:
+            if worker:worker.join(2)
+            if previous is None:home._instances.pop(key,None)
+            else:home._instances[key]=previous
+
+    def test_concurrent_receipts_room_sync_and_page_requests_keep_http_available(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from http_tls_server import ThreadedTLSServer
+        self.start();turn=self.finished()['id']
+        key=str(self.computer.media.root.resolve());previous=home._instances.get(key)
+        home._instances[key]=self.world;self.world.desktop=object()
+        server=ThreadedTLSServer(('127.0.0.1',0),agent.handler(self.computer,'test-token',lambda:True,self.brain))
+        thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+        def request(index):
+            connection=HTTPConnection('127.0.0.1',server.server_port,timeout=3)
+            try:
+                if index%3==0:
+                    connection.request('POST','/home/api/chat/receipt',json.dumps({'id':turn}),
+                        {'Cookie':self.cookie,'Content-Type':'application/json','Origin':'https://127.0.0.1:'+str(server.server_port)})
+                else:
+                    connection.request('GET','/home/api/state' if index%3==1 else '/home/',headers={'Cookie':self.cookie})
+                response=connection.getresponse();response.read();return response.status
+            finally:connection.close()
+        try:
+            with ThreadPoolExecutor(max_workers=12) as clients:
+                self.assertEqual(list(clients.map(request,range(120))),[200]*120)
+            self.assertTrue(self.chat.authorized(self.session))
+        finally:
+            server.shutdown();server.server_close();thread.join(2)
+            if previous is None:home._instances.pop(key,None)
+            else:home._instances[key]=previous
+
     def test_model_uses_real_identity_shared_memory_and_never_changes_body_envelope(self):
         before=dict(self.memory.row());self.start();row=self.finished();self.assertEqual(row['state'],'done');self.assertEqual(row['reply']['say'],'好呀，我记得。')
         after=dict(self.memory.row());self.assertEqual([after[k] for k in ('device','boot','session','generation')],[before[k] for k in ('device','boot','session','generation')])
