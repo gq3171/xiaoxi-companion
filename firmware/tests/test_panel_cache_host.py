@@ -1,4 +1,5 @@
 import unittest
+import sys
 import test_runtime_core as core
 
 class PanelCacheTests(unittest.TestCase):
@@ -31,4 +32,4 @@ int main(void){
  assert(!pet_panel_cache_valid(NULL,0,&old));
  pet_panel_cache_commit(a,&old,UINT32_MAX);assert(pet_panel_cache_target(a,cap,b,cap,&sequence)<0);
  free(a);free(b);return 0;}
-''',['pet_panel_cache','pet_util'])
+''',['pet_panel_cache','pet_util'],compiler_flags=[] if sys.platform=='darwin' else ['-lcrypto'])

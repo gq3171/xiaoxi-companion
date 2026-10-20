@@ -12,7 +12,7 @@ jobs:
         with:
           node-version: '22'
       - name: Install native test dependencies
-        run: sudo apt-get update && sudo apt-get install -y python3-pil python3-websocket ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y build-essential libssl-dev zlib1g-dev python3-pil python3-websocket ffmpeg
       - name: Installer contracts
         run: python3 -m unittest discover -s scripts -p 'test_*.py'
       - name: Brain and transport regressions (fixtures only)
