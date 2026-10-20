@@ -43,6 +43,7 @@ def validate(options):
         if type(value) is not int or not lo<=value<=hi:raise ValueError('runtime setting outside supported range')
     for value in result['http']['lane_limits'].values():
         if type(value) is not int or not 1<=value<=128:raise ValueError('invalid HTTP lane budget')
+    if type(result['desktop']['browser_vision']) is not bool:raise ValueError('invalid browser vision capability')
     if result['desktop']['cdp_port']==result['desktop']['probe_cdp_port']:raise ValueError('browser and diagnostic ports must differ')
     if result['desktop']['renderer'] not in ('gles2','pixman'):raise ValueError('unsupported compositor renderer')
     if not re.fullmatch('/dev/dri/renderD[0-9]+',str(result['desktop']['drm_device'])):raise ValueError('invalid DRM render device')

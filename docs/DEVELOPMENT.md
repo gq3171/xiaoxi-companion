@@ -33,3 +33,5 @@ python3 -m unittest discover -s firmware/tests -p 'test_runtime_core.py'
 部署配置统一由 `deployment_paths.py`、`runtime_config.py` 与 `backend_config.py` 读取；改动路径/模型字段时需跑安装器、配置一致性和实际请求回归。未知配置必须拒绝，不能悄悄回到另一块磁盘或其他付费模型。
 
 多模型回归入口 `python3 -m unittest discover -s computer -p test_model_backends.py`，包含不调用云服务的本地 HTTP 和音频夹具。修改协议时同时检查模型/Key 路由、流结束、取消与任务执行，不只替换模型字符串。
+
+浏览器视觉回归：`python3 -m unittest discover -s computer -p test_visual_browser.py`；执行器回归还核对图片仅进入一次推理、不进入任务检查点。真正 Chromium 合成探针 `computer/visual_probe.py` 需部署代理显式在独立端口/用户目录运行，参考 DESKTOP.md，不作为普通 CI 的真实账户操作。

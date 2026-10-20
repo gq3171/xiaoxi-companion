@@ -74,3 +74,19 @@ class ExecutorTests(unittest.TestCase):
     FakeBrowser.instances[0].registered=True;state.give_back('owner');returned.set()
     thread.join(3);self.assertFalse(thread.is_alive());self.assertEqual(self.store.get(self.id)['state'],'succeeded')
    finally:self.stop.set();attempted.set();returned.set();thread.join(2)
+
+ def test_visual_image_is_seen_once_by_model_and_never_checkpointed(self):
+  class Vision(FakeBrowser):
+   def visual_look(self,tab=None):return dict(visual='synthetic-visual',width=800,height=600)
+   def visual_message(self,token):return dict(role='user',content=[dict(type='image',source=dict(type='base64',media_type='image/png',data='SYNTHETIC_IMAGE_BYTES'))])
+   def visual_clear(self):pass
+   def visual_click(self,*args):self.registered=True;return dict(dispatched=True,verification=False)
+  replies=iter([dict(action='browser_open',url='https://example.invalid/'),dict(action='browser_look'),dict(action='browser_visual_click',visual='synthetic-visual',box=[400,400,600,600],target='demo'),dict(action='browser_check',expected='注册演示已完成'),dict(action='finish',state='succeeded',message='已核对')]);seen=[]
+  def model(messages):
+   seen.append(json.dumps(messages));return next(replies)
+  with patch('desktop_executor.DesktopBrowser',Vision):run_desktop(self.worker(model),self.job)
+  self.assertEqual(self.store.get(self.id)['state'],'succeeded')
+  self.assertEqual(sum('SYNTHETIC_IMAGE_BYTES' in x for x in seen),1)
+  with self.store.lock:
+   raw=' '.join(str(tuple(r)) for r in self.store.db.execute('SELECT command,output FROM steps'));raw+=self.store.db.execute('SELECT checkpoint FROM desktop_jobs').fetchone()[0]
+  self.assertNotIn('SYNTHETIC_IMAGE_BYTES',raw)

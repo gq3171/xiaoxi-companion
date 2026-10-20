@@ -7,7 +7,7 @@ from desktop_browser import DesktopBrowser
 from desktop_jobs import broker,DesktopBusy
 from private_input import inputs,wipe
 
-ACTIONS={'browser_open','browser_tabs','browser_snapshot','browser_click','browser_type','browser_key','browser_scroll','browser_check','browser_screenshot','browser_close','handoff'}
+ACTIONS={'browser_open','browser_tabs','browser_snapshot','browser_click','browser_type','browser_key','browser_scroll','browser_check','browser_screenshot','browser_close','browser_look','browser_visual_click','handoff'}
 def requires_browser(goal):return bool(re.search(r'浏览器|网页交互|注册|表单|登录|填写.{0,8}网站|点击.{0,8}网页',goal,re.I))
 
 def run_desktop(worker,job,messages=None,first=None,ordinal=1,checked=False,last_code=None):
@@ -26,7 +26,7 @@ def run_desktop(worker,job,messages=None,first=None,ordinal=1,checked=False,last
         raw=redact(json.dumps(browser.private_redact(result) if hasattr(browser,"private_redact") else result,ensure_ascii=False))
         if len(raw.encode())>14000:raw=raw.encode()[:14000].decode('utf8','ignore')+' [观察内容已截短，必要时重新读取]'
         messages.append({'role':'user','content':json.dumps({'untrusted_tool_result':raw},ensure_ascii=False)})
-    decisions=0
+    decisions=0;pending_image=None
     def handoff(message):
         form=None
         if hasattr(browser,'private_form'):
@@ -80,16 +80,21 @@ def run_desktop(worker,job,messages=None,first=None,ordinal=1,checked=False,last
                 if apply_private():break
                 browser.heartbeat();worker.stop.wait(.25)
             if paused or state.state().get('phase')=='resume_requested':
-                first=None;checked=False;last_code=None;browser.snapshots.clear()
+                first=None;checked=False;last_code=None;pending_image=None;browser.snapshots.clear()
+                if hasattr(browser,"visual_clear"):browser.visual_clear()
                 if browser.tabs:observe(browser.snapshot())
                 messages.append({'role':'user','content':'主人已交回桌面。重新核对页面，继续原任务；接管前未发出的操作全部作废。'})
                 state.phase(job_id,'running')
-            reply=first if first is not None else worker.model(messages);first=None
+            ephemeral=messages+([pending_image] if pending_image else [])
+            try:reply=first if first is not None else worker.model(ephemeral)
+            finally:pending_image=None;ephemeral=None
+            first=None
             decisions+=1
             if not isinstance(reply,dict):raise ValueError('invalid browser task response')
             if worker.cancelled(job_id):stopped();return
             if state.waiting(job_id):continue # Discard a model reply arriving after takeover.
             action=reply.get('action');tab=reply.get('tab')
+            if action not in ('browser_look','browser_visual_click') and hasattr(browser,'visual_clear'):browser.visual_clear()
             if action=='handoff':
                 if not browser.tabs:observe({'error':'请先用browser_open打开本任务页面，再交给主人处理。'});continue
                 handoff(str(reply.get('message') or '请在桌面完成当前验证，然后点“交回小溪”。'));continue
@@ -113,6 +118,9 @@ def run_desktop(worker,job,messages=None,first=None,ordinal=1,checked=False,last
                     elif action=='browser_scroll':result=browser.scroll(reply.get('dy'),tab)
                     elif action=='browser_check':result=browser.check(reply.get('expected'),tab);passed=result.get('passed') is True;code=0 if passed else 1
                     elif action=='browser_screenshot':result=browser.screenshot(tab)
+                    elif action=='browser_look':
+                        result=browser.visual_look(tab);pending_image=browser.visual_message(result['visual'])
+                    elif action=='browser_visual_click':result=browser.visual_click(reply.get('visual'),reply.get('box'),reply.get('target'),tab)
                     elif action=='browser_close':result=browser.close_tab(tab)
                     elif action in ('run','check'):
                         # Do not grant arbitrary shell execution in the GUI path.
@@ -130,7 +138,9 @@ def run_desktop(worker,job,messages=None,first=None,ordinal=1,checked=False,last
                     if form and form['fields']:
                         handoff('这一步需要主人补充信息。')
                 except (ValueError,BrowserUnavailable,BrowserBlocked):pass
-            if action in ('browser_open','browser_click','browser_type','browser_key','browser_scroll','browser_close','run'):checked=False
+            if action in ('browser_open','browser_click','browser_type','browser_key','browser_scroll','browser_close','browser_visual_click','run'):
+                checked=False
+                if hasattr(browser,'visual_clear'):browser.visual_clear()
             if passed:checked=True
             last_code=code
             # Ordinary form values may be task data; credentials never reach this path.
