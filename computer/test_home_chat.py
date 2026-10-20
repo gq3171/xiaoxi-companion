@@ -205,6 +205,9 @@ class HomeChatTests(unittest.TestCase):
         self.assertIsNone(self.world.reminders.claim(self.session));self.assertEqual(self.world.reminders.claim('body')['id'],a['id'])
 
     def test_world_actions_execute_and_cat_care_does_not_cancel_a_journey(self):
+        # Assert the immediate care intent; real-time turning is covered by
+        # WorldLife tests. Slow ARM scheduling must not advance this fixture.
+        now=self.world.monotonic();self.world.monotonic=lambda:now
         self.provider.responses=[dict(input='direct',remember=False,action='speak',say='好',world_action='yard',home_action='roam')]
         self.start('带小猫去小院走走');self.assertIn('小院',self.finished()['reply']['say']);self.assertEqual(self.world.life.pending['to'],'yard')
         self.world.life.cat['hunger']=20
