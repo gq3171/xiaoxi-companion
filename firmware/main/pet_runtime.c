@@ -612,16 +612,17 @@ static void dialogue_candidate(const char *text,bool owner,bool voice,uint32_t g
         }else pet_face_set("暂时没连上","配对码还没有生成，请等小主机联网后再问我。");
         pet_wake_activity((uint32_t)(esp_timer_get_time()/1000));free(raw);cJSON_Delete(answer);return;
     }
-    if(answer&&(!strcmp(str(answer,"action"),"computer_task")||!strcmp(str(answer,"action"),"computer_cancel")||!strcmp(str(answer,"action"),"computer_resume"))){
+    if(answer&&(!strcmp(str(answer,"action"),"computer_task")||!strcmp(str(answer,"action"),"computer_cancel")||!strcmp(str(answer,"action"),"computer_resume")||!strcmp(str(answer,"action"),"computer_update"))){
         bool cancel=!strcmp(str(answer,"action"),"computer_cancel");
         bool resume=!strcmp(str(answer,"action"),"computer_resume");
-        int result=cancel?pet_computer_cancel():resume?pet_computer_resume(str(answer,"job_id")):pet_computer_queue(str(answer,"task"));
+        bool update=!strcmp(str(answer,"action"),"computer_update");
+        int result=cancel?pet_computer_cancel():resume?pet_computer_resume(str(answer,"job_id")):update?pet_computer_note(text):pet_computer_queue_from(str(answer,"task"),text);
         if(!result){
 #ifdef CONFIG_DESKPET_MEDIA
             if(!cancel)pet_utf8_copy(s_waiting_media_job,sizeof(s_waiting_media_job),pet_computer_current_id());
 #endif
             pet_cloud_begin_turn(generation);pet_computer_tick((uint32_t)(esp_timer_get_time()/1000),false);
-            deliver(cancel?"好，我让它停下来。":resume?"好，我接着做，先看看上次做到哪儿了。":"好呀，我去弄，弄好了叫你。",generation,false);
+            deliver(cancel?"好，我让它停下来。":update?"补充要求已保存，我会继续原来的任务。":resume?"好，我接着做，先看看上次做到哪儿了。":"好呀，我去弄，弄好了叫你。",generation,false);
         }else deliver("这次没有提交成功。电脑连接还未配置、已有任务在进行，或任务记录没能保存。",generation,false);
         free(raw);cJSON_Delete(answer);return;
     }

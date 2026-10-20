@@ -38,7 +38,7 @@ CURRENT_LAYOUT = None
 INSTALL = Path('/opt/deskpet-computer')
 UNIT = Path('/etc/systemd/system/deskpet-computer.service')
 PACKAGES = ['python3', 'python3-pil', 'python3-websocket', 'build-essential',
-            'openssl', 'ffmpeg', 'ca-certificates', 'acl']
+            'openssl', 'ffmpeg', 'ca-certificates', 'acl', 'nftables']
 ALLOWED = {'MINIMAX_API_KEY', 'MINIMAX_API_HOST', 'MINIMAX_MODEL', 'LLM_PROVIDER', 'LLM_API_TYPE', 'LLM_BASE_URL', 'LLM_MODEL', 'LLM_API_KEY', 'TTS_VOICE'}
 ALLOWED |= {kind+'_'+field for kind in ('ASR','TTS','SEARCH') for field in ('PROVIDER','BASE_URL','MODEL','API_KEY')}
 EVENTS = []
@@ -461,6 +461,8 @@ def install(args):
 
 
 def doctor():
+    from network_guard import inspect as check_network_guard
+    if not check_network_guard(document=CURRENT_LAYOUT or layout.read_layout()):raise InstallError('Private browser network policy is not active; inspect the service startup guard')
     config = BASE/'config'
     values = env_read(config/'service.env')
     origin = values.get('DESKPET_PUBLIC_ORIGIN', '')

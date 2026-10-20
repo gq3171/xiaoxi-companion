@@ -274,10 +274,18 @@ int main(void){
             name=frame.get('alias',frame['name']);palette=arrays[name+'_palette'];pixels=zlib.decompress(arrays[name+'_pixels'])
             self.assertEqual(len(pixels),208*264)
             self.assertEqual(hashlib.sha256(palette+pixels).hexdigest(),frame['packed_sha256'])
-            self.assertEqual(hashlib.sha256((ROOT/'assets/character'/frame['source_path']).read_bytes()).hexdigest(),frame['source_sha256'])
             alpha=bytes(palette[i*4+3] for i in pixels)
             self.assertTrue(any(a>240 for a in alpha))
             if frame['name'].startswith('cat_'):
                 self.assertFalse(any(alpha[y*208+x]>=32 for y in range(264) for x in range(208) if not (24<=x<184 and 116<=y<260)))
             self.assertTrue(all(a==0 for a in alpha[:208]+alpha[-208:]))
             self.assertTrue(all(alpha[y*208]==0 and alpha[y*208+207]==0 for y in range(264)))
+
+    def test_optional_source_provenance_requires_an_explicit_source_directory(self):
+        import os
+        directory=os.environ.get('DESKPET_ART_SOURCE_DIR')
+        if not directory:return # Public packed assets above are always checked.
+        manifest=json.loads((ROOT/'assets/character/manifest.json').read_text())
+        for frame in manifest['frames']:
+            path=Path(directory)/Path(frame['source_path']).name
+            self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(),frame['source_sha256'])

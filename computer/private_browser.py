@@ -43,7 +43,15 @@ def safe_label(text):
 
 
 class PrivateBrowser:
+    def private_mark(self,unknown=False):
+        self._privacy_tainted=True
+        if unknown:self._privacy_recovery=True
+
     def private_redact(self, value):
+        if getattr(self,'_privacy_recovery',False):
+            from privacy_projection import Projected
+            if isinstance(value,Projected):return value
+            if isinstance(value,str):return '[恢复后的私密内容已隐藏]'
         if isinstance(value, str):
             for secret in sorted(getattr(self, '_private_values', []), key=len, reverse=True):
                 if secret:
@@ -142,6 +150,7 @@ class PrivateBrowser:
         return page
 
     def private_apply(self, form, values, activate, valid):
+        self.private_mark()
         page = self._private_context(form, valid)
         # Validate the entire field set before sending the first character.
         for binding in form['bindings']:

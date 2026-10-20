@@ -51,9 +51,11 @@ class DesktopBrowser(VisualBrowser, PrivateBrowser, Browser):
         self.ensure()
         if len([t for t in self.json_request('/json/list') if t.get('type')=='page'])>=7:raise BrowserBlocked('当前桌面已有多个页面，请在桌面关闭不再需要的标签，再交回继续。')
         value=super().open(url);self.control.call('Target.activateTarget',dict(targetId=value['tab']));return value
-    def checkpoint(self):return dict(tabs=list(self.tabs),current=self.current,owned=list(self.owned_targets))
+    def checkpoint(self):return dict(tabs=list(self.tabs),current=self.current,owned=list(self.owned_targets),privacy_tainted=bool(getattr(self,'_privacy_tainted',False)))
     def restore(self,state):
         if not state or not state.get('tabs'):return
+        # Old checkpoints have no marker: conservatively protect their pages.
+        if state.get('privacy_tainted',True):self.private_mark(unknown=True)
         self.ensure();sockets={x['id']:x for x in self.json_request('/json/list') if 'webSocketDebuggerUrl' in x}
         ids=state['tabs']
         if len(ids)>3 or any(not isinstance(x,str) or not re.fullmatch('[0-9A-Fa-f]{32}',x) for x in ids):raise BrowserUnavailable('页面恢复信息无效')
@@ -64,9 +66,17 @@ class DesktopBrowser(VisualBrowser, PrivateBrowser, Browser):
         self.current=state.get('current') if state.get('current') in self.tabs else ids[0]
     def snapshot(self,tab=None):
         info=super().snapshot(tab)
+        if getattr(self,'_privacy_recovery',False):
+            from privacy_projection import project
+            return project(info)
         # Password presence is informational; stop only at its protected action.
         info['sensitive_fields']=bool(info.get('password'));info['captcha_required']=bool(info.get('captcha'));info['needs_human']=False;info.pop('blocked_reason',None)
         return self.private_redact(info)
+    def list_tabs(self):
+        values=super().list_tabs()
+        if getattr(self,'_privacy_recovery',False):
+            return [dict(tab=v['tab'],title='受保护页面',url='[已隐藏]') for v in values]
+        return values
     def registration(self,page):
         return page.evaluate('''(()=>{const heading=Array.from(document.querySelectorAll('h1,h2')).map(x=>x.innerText).join(' '),fields=Array.from(document.querySelectorAll('input,textarea,[role="textbox"]')).some(x=>x.getClientRects().length);return fields&&(/register|sign.?up|create.?account/i.test(location.pathname)||/注册|创建.{0,4}(账户|账号)|create.{0,32}account|sign.?up|register/i.test(heading)||!!document.querySelector('form[action*="register"],form[action*="signup"]'));})()''') is True
     def activation_context(self,page,item):
@@ -119,7 +129,7 @@ class DesktopBrowser(VisualBrowser, PrivateBrowser, Browser):
         if attrs.get('autocomplete')=='one-time-code' or re.search(r'验证码|one.?time|verification code|security code',item['name'],re.I):raise BrowserBlocked('请在桌面输入验证码并完成当前步骤，然后点“交回小溪”。')
         return super().type(ref,text,tab)
     def screenshot(self,tab=None):
-        if getattr(self,"_private_values",[]):raise BrowserUnavailable("隐私填写期间不保存网页截图；可以直接查看实时桌面。")
+        if getattr(self,"_private_values",[]) or getattr(self,'_privacy_recovery',False):raise BrowserUnavailable("隐私填写期间不保存网页截图；可以直接查看实时桌面。")
         return super().screenshot(tab)
     def detach(self):
         self.visual_clear()

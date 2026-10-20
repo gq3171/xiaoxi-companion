@@ -22,7 +22,7 @@ sudo ./install.sh --apply --data-dir /USER_CHOSEN_STORAGE/xiaoxi --hostname USER
 sudo ./install.sh --doctor --json
 ```
 
-检查步骤默认只读。依赖为 Debian/Ubuntu、Python >=3.11、systemd、aarch64/x86_64、至少 2 GiB 可用空间、支持 Unix 权限的数据目录。安装器自动安装缺失软件包、创建普通任务用户、编译 native 库/生成资源、生成独立随机 Token、CA/服务器证书、按路径生成 systemd 并启动主脑。
+检查步骤默认只读。依赖为 Debian/Ubuntu、Python >=3.11、systemd、aarch64/x86_64、至少 2 GiB 可用空间、支持 Unix 权限的数据目录。安装器自动安装缺失软件包（包括私有 CDP 规则使用的 nftables）、创建普通任务用户、编译 native 库/生成资源、生成独立随机 Token、CA/服务器证书、按路径生成 systemd 并启动主脑。
 
 高级选项仅在需要时使用：`--port`、`--install-dir`、`--require-mount`、`--task-user`、`--settings-file`、`--provider`、`--api-base`、`--api-type`、`--model`。配置完整列表见 [CONFIGURATION.md](CONFIGURATION.md)。不要把默认参数变成一份让用户逐项填的表。
 
@@ -57,3 +57,5 @@ sudo ./install.sh --doctor --json
 网页配对命令为 `sudo python3 SOFTWARE_DIRECTORY/home_pair_admin.py`。路径、origin 和端口自动读取，只显示一次性配对码（不要收集到公共日志）。完整桌面按 [DESKTOP.md](DESKTOP.md) 安装/验收；目录与 unit 已生成，不再手改路径。
 
 验收记录保留版本 SHA、步骤结果、TLS/身份状态和待测项即可。不得贴 env 全文、Cookie、Token、私人域名/IP、原始聊天、录音或私钥。系统包安装不是事务，失败不能假定整机已回滚；先看具体失败步骤，不盲目重装。
+
+任务续办、未知操作核对和私密页面恢复见 [TASKS.md](TASKS.md)。升级后核对认证 health 的 runtime 组件指纹；根服务必须配置普通执行用户，不能通过留空身份绕过检查。

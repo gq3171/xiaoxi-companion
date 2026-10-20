@@ -19,10 +19,13 @@ class DesktopJobs:
         return self.store.db.execute('SELECT * FROM desktop_jobs WHERE job=?',(job,)).fetchone()
     def save(self,job,value,phase='running'):
         if not ID.fullmatch(job):raise ValueError('invalid desktop job')
-        raw=json.dumps(value,ensure_ascii=False,separators=(',',':'),allow_nan=False)
-        if len(raw.encode())>160*1024:raise ValueError('desktop checkpoint budget')
         with self.condition:
             previous=self._row(job)
+            if previous and json.loads(previous['checkpoint']).get('manual_input'):
+                value=dict(value,manual_input=True)
+                value['browser']=dict(value.get('browser',{}),privacy_tainted=True)
+            raw=json.dumps(value,ensure_ascii=False,separators=(',',':'),allow_nan=False)
+            if len(raw.encode())>160*1024:raise ValueError('desktop checkpoint budget')
             if phase=='running' and (self.lease or previous and previous['phase']=='waiting_user'):phase='waiting_user'
             self.store.db.execute('INSERT INTO desktop_jobs VALUES(?,?,?,?) ON CONFLICT(job) DO UPDATE SET phase=excluded.phase,checkpoint=excluded.checkpoint,updated=excluded.updated',(job,phase,raw,int(time.time())));self.store.db.commit();self.condition.notify_all()
     def load(self,job):
@@ -76,7 +79,13 @@ class DesktopJobs:
             if self.inflight:raise DesktopBusy('小溪正在结束当前动作，稍后再试')
             self.lease=dict(session=session,until=self.clock()+120)
             job=self.current()
-            if job:self.phase(job,'waiting_user','桌面已交给你。完成当前步骤后，点“交回小溪”。')
+            if job:
+                checkpoint=self.load(job)
+                if checkpoint:
+                    checkpoint['manual_input']=True
+                    checkpoint.setdefault('browser',{})['privacy_tainted']=True
+                    self.save(job,checkpoint,phase='waiting_user')
+                self.phase(job,'waiting_user','桌面已交给你。完成当前步骤后，点“交回小溪”。')
             return self.state(session)
     def renew(self,session):
         with self.condition:
@@ -119,9 +128,10 @@ class DesktopJobs:
         finally:
             with self.condition:self.inflight=False;self.condition.notify_all()
     @contextlib.contextmanager
-    def action(self,job):
+    def action(self,job,revision=None):
         with self.condition:
             if self.waiting(job):raise DesktopBusy('桌面正在等待主人处理')
+            if revision is not None and revision!=self.store.tasks.revision(job):raise DesktopBusy('主人已补充要求，旧动作未发出')
             self.inflight=True
         try:yield
         finally:

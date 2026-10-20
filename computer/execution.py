@@ -19,13 +19,19 @@ class Identity:
         self.account = None
         name = os.environ.get('DESKPET_EXECUTOR_USER', '')
         if name:
-            self.account = pwd.getpwnam(name)
+            try:self.account = pwd.getpwnam(name)
+            except KeyError:raise ExecutionUnavailable('executor account does not exist') from None
             if not self.account.pw_uid:
                 raise ExecutionUnavailable('executor must not be root')
 
-    def prepare(self, workspace):
+    def validate(self):
         if os.geteuid() == 0 and self.account is None:
             raise ExecutionUnavailable('non-root executor is not configured')
+        if self.account and os.geteuid() not in (0,self.account.pw_uid):
+            raise ExecutionUnavailable('service cannot adopt the executor identity')
+
+    def prepare(self, workspace):
+        self.validate()
         root=os.open(workspace,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
         try:
             if self.account and os.geteuid()==0:

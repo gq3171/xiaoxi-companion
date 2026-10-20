@@ -53,7 +53,7 @@ class VisualBrowser:
         if not enabled():
             raise BrowserUnavailable('当前模型未启用图片输入，继续使用元素定位。')
         if self.cancelled():raise BrowserCancelled('任务已停止')
-        if getattr(self,'_private_values',[]):
+        if getattr(self,'_private_values',[]) or getattr(self,'_privacy_recovery',False):
             raise BrowserBlocked('私密填写期间不向模型发送截图，请用元素观察或私密填写窗继续。')
         value=page.evaluate(_SURFACE)
         if not isinstance(value,dict):raise BrowserUnavailable('无法核对当前截图环境')

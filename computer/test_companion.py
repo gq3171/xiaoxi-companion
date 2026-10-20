@@ -116,6 +116,7 @@ class CompanionTests(unittest.TestCase):
         self.receipt(trace,'accepted',source)
         forget=self.add('请忘记约好聊星星这件事','c'*32)['result']
         self.reflection({'ops':[dict(op='forget',kind='commitment',slot='星星',source_id=forget)]},'d'*32)
+        self.assertEqual(self.store.forget_epoch,1)
         for table in ('companion_turns','companion_threads','companion_events','companion_checks'):
             self.assertEqual(self.store.db.execute('SELECT count(*) FROM '+table).fetchone()[0],0)
 

@@ -2,7 +2,7 @@
 VERSION = 3
 BASE_HOME = ('roam', 'rest', 'wake', 'wash', 'work', 'window')
 DIALOGUE = ('speak', 'search', 'recall', 'list_reminders', 'cancel_reminder',
-            'computer_task', 'computer_cancel', 'computer_status', 'computer_resume')
+            'computer_task', 'computer_cancel', 'computer_status', 'computer_resume', 'computer_update')
 TASK_TOOLS = ('run', 'check', 'search', 'browser_open', 'browser_tabs',
               'browser_snapshot', 'browser_click', 'browser_type', 'browser_key',
               'browser_scroll', 'browser_check', 'browser_screenshot',
@@ -12,7 +12,7 @@ TASK_TOOLS = ('run', 'check', 'search', 'browser_open', 'browser_tabs',
 def describe(feedback=None):
     feedback = feedback if isinstance(feedback, dict) else {}
     home = BASE_HOME + (('read',) if feedback.get('home_protocol') == 2 else ())
-    actions = tuple(x for x in DIALOGUE if x != 'computer_resume' or feedback.get('computer_protocol') == 2)
+    actions = tuple(x for x in DIALOGUE if (x not in ('computer_resume','computer_update') or feedback.get('task_protocol') == 2 or x=='computer_resume' and feedback.get('computer_protocol')==2))
     return dict(version=VERSION, dialogue=actions, home=home,
                 autonomous=('wait', 'speak', 'recall'),
                 tts_prefetch=feedback.get('tts_protocol') == 2,

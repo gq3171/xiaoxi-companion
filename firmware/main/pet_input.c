@@ -12,7 +12,7 @@ bool pet_input_direct(const cJSON *answer,bool microphone)
     if(!cJSON_IsObject(answer))return false;
     const char *action=value(answer,"action");
     if(strcmp(action,"speak") && strcmp(action,"search") && strcmp(action,"list_reminders") && strcmp(action,"cancel_reminder")&&
-       strcmp(action,"computer_task")&&strcmp(action,"computer_cancel")&&strcmp(action,"computer_resume"))return false;
+       strcmp(action,"computer_task")&&strcmp(action,"computer_cancel")&&strcmp(action,"computer_resume")&&strcmp(action,"computer_update"))return false;
     return !microphone || !strcmp(value(answer,"input"),"direct");
 }
 bool pet_input_remember(const cJSON *answer,bool microphone,bool owner)

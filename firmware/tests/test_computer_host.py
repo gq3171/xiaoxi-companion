@@ -169,6 +169,34 @@ int main(void){
  return 0;}
 ''')
 
+    def test_resume_accepts_canonical_original_job_and_does_not_create_a_second_task(self):
+        self.run_computer(r'''
+int main(void){
+ assert(!pet_computer_start());assert(!pet_computer_submit("演示原任务",server_id));
+ server_state="interrupted";pet_computer_tick(100,false);
+ assert(!pet_computer_resume_id(server_id,"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"));
+ server_state="queued";pet_computer_tick(200,false);
+ assert(!strcmp(text(s_job,"job_id"),server_id));
+ assert(!cJSON_GetArraySize(cJSON_GetObjectItem(s_job,"pending_results")));
+ pet_computer_tick(6000,false);assert(!strcmp(operation,"status")&&!strcmp(submitted_id,server_id));
+ return 0;}
+''')
+
+    def test_original_request_and_pending_note_survive_submit_and_reboot(self):
+        self.run_computer(r'''
+int main(void){
+ assert(!pet_computer_start());assert(!pet_computer_submit_from("模型整理目标",server_id,"主人实际的原始要求"));
+ assert(!strcmp(text(s_job,"original_request"),"主人实际的原始要求"));
+ assert(!pet_computer_note_id("只做只读核对","bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"));
+ assert(pet_computer_note_id("不能覆盖尚未同步的要求","cccccccccccccccccccccccccccccccc")<0);
+ pet_computer_tick(100,false);assert(!strcmp(operation,"submit"));
+ assert(!strcmp(text(s_job,"pending_note"),"只做只读核对"));
+ assert(!pet_computer_start());fail=true;pet_computer_tick(6000,false);assert(!strcmp(operation,"update"));
+ assert(!pet_computer_start());fail=false;pet_computer_tick(12000,false);assert(!strcmp(operation,"update"));
+ assert(!text(s_job,"pending_note")[0]);
+ return 0;}
+''')
+
     def test_blocked_task_can_be_cancelled_without_claiming_success(self):
         self.run_computer(r'''
 int main(void){

@@ -118,10 +118,11 @@ def render_service(kind, config, locator=DEFAULT_LOCATOR):
     else:
         argv=['/usr/bin/python3',software/(kind+'_daemon.py')]
     lines += ['ExecStartPre=/usr/bin/mountpoint -q '+q(config['storage_mount']),
+              'ExecStartPre='+('' if kind=='computer' else '+')+'/usr/bin/python3 '+q(Path(config['install_dir'])/'network_guard.py')+' --ensure',
               'ExecStart='+' '.join(q(s) for s in argv),
               'StandardOutput=append:'+service_path(root/'logs/service.log' if kind=='computer' else root/(kind+'.log')),
               'StandardError=append:'+service_path(root/'logs/service.log' if kind=='computer' else root/(kind+'.log')),
-              'UMask=0077','KillMode=control-group','TimeoutStopSec=15']
+              'UMask=0077','NoNewPrivileges=yes','KillMode=control-group','TimeoutStopSec=15']
     if kind=='computer':lines+=['Restart=on-failure','RestartSec=5','MemoryHigh=768M','MemoryMax=1G','TasksMax=256','','[Install]','WantedBy=multi-user.target']
     else:lines+=['PrivateTmp=yes','Restart=no','MemoryMax=1200M','TasksMax=192']
     return '\n'.join(lines)+'\n'

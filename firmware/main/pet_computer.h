@@ -8,6 +8,10 @@ void pet_computer_check_connection(uint32_t now);
 /* Client id supplied once from hardware RNG, then checkpointed before HTTP. */
 int pet_computer_submit(const char *goal,const char *client_id);
 int pet_computer_queue(const char *goal);
+int pet_computer_submit_from(const char *goal,const char *client_id,const char *original);
+int pet_computer_queue_from(const char *goal,const char *original);
+int pet_computer_note(const char *note);
+int pet_computer_note_id(const char *note,const char *id);
 int pet_computer_cancel(void);
 /* Explicit continuation creates a new durable request ID; never replays old work. */
 int pet_computer_resume(const char *parent_id);

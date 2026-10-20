@@ -22,7 +22,7 @@ class AuditStatusTests(unittest.TestCase):
             computer.next();computer.update(job,'failed','旧的笼统报错')
             computer.update(job,'failed','查询未完成；旧记录未保留具体异常。')
             before=list(computer.db.iterdump())
-            provider=fixtures.FakeProvider([json.dumps(dict(input='direct',action='computer_status',job_id=job))])
+            provider=fixtures.FakeProvider([json.dumps(dict(input='direct',action='computer_status',job_id=job)),json.dumps(dict(action='speak',say='查询还没完成，旧记录未保留具体异常，我不能猜测。'))])
             service=brain.Brain(self.store,provider,'x'*48,computer=computer)
             result=brain.parse_answer(service.model(self.env|dict(kind='dialogue',candidate='服务器返回什么错误？',microphone=True,system='旧的笼统报错'))['text'])
             self.assertEqual(result['action'],'speak')

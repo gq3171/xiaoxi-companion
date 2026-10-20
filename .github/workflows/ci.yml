@@ -17,12 +17,8 @@ jobs:
         run: python3 -m unittest discover -s scripts -p 'test_*.py'
       - name: Brain and transport regressions (fixtures only)
         run: python3 -m unittest discover -s computer -p 'test_*.py'
-      - name: Firmware cloud and voice configuration (host fixtures)
-        run: |
-          python3 -m unittest discover -s firmware/tests -p 'test_cloud_host.py'
-          python3 -m unittest discover -s firmware/tests -p 'test_voice_selection.py'
-          python3 -m unittest discover -s firmware/tests -p 'test_runtime_core.py'
-          python3 -m unittest discover -s firmware/tests -p 'test_computer_host.py'
+      - name: Complete public firmware host fixtures and packed assets
+        run: python3 -m unittest discover -s firmware/tests -p 'test_*.py'
       - name: Frontend and noVNC contracts
         run: |
           node computer/test_home_web.cjs
