@@ -7,6 +7,7 @@ from pathlib import Path
 def manifest():
     root=Path(__file__).parent
     names=('agent.py','brain.py','home_chat.py','desktop_executor.py','desktop_browser.py',
-           'task_dossier.py','task_control.py','task_status.py','private_browser.py','network_guard.py')
+           'task_dossier.py','task_control.py','task_status.py','private_browser.py','network_guard.py',
+           'desktop_lifecycle.py','task_progress.py')
     return dict(contract='desktop-v1',task_protocol=2,privacy_observation_protocol=2,
                 components={name:hashlib.sha256((root/name).read_bytes()).hexdigest() for name in names})

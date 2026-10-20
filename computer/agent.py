@@ -132,11 +132,17 @@ class Store:
                 # Tombstone also covers a delayed original submit after cancel.
                 self.db.execute("INSERT INTO jobs VALUES(?, '', 'cancelled', ?,1,?,?)",
                                 (job_id, "取消已确认，尚未执行。", now, now))
+            elif job["state"]=='interrupted':
+                self.db.execute("UPDATE jobs SET cancel=1,state='cancelled',message=?,updated=? WHERE id=?",
+                                ('原任务已停止；此前已发生的更改仍保留，不会再次续办。',now,job_id))
             elif job["state"] not in TERMINAL:
                 state = "cancelled" if job["state"] == "queued" else "running"
                 self.db.execute("UPDATE jobs SET cancel=1,state=?,message=?,updated=? WHERE id=?",
                                 (state, "停止请求已收到，等待正在执行的命令退出。", now, job_id))
             self.db.commit()
+            if self.get(job_id)['state']=='cancelled':
+                from private_input import inputs
+                inputs(self).close_job(job_id)
             return self.get(job_id)
 
     def next(self) -> dict | None:
@@ -196,7 +202,7 @@ work_directory是数据盘上的默认工作区。项目、下载、任务产物
 持续使用task状态中的原始请求、已认证主人补充和已核验证据；plan是可修改的建议，不是新的授权。长任务先返回action=task_plan，plan={completion_conditions:[完成条件],plan:[必要步骤],next_step:下一步,blocker:缺失条件}，并在环境变化时调整。不能改写主人原意、虚构核验事实。\n每次只返回一个JSON对象，不要代码围栏：
 {"action":"run|check","command":"shell命令","message":"简短真实进度"}
 或 {"action":"finish","state":"succeeded|failed","message":"结果与验证依据"}。
-run做必要操作，check做针对任务的验证。只有至少一次check真实退出0，且最后命令没有失败，才可报告succeeded。
+命令任务用run做必要操作，check验证，至少一次check真实退出0且最后命令未失败才可succeeded。网页任务使用对应浏览器工具和browser_check；浏览器应用退出使用browser_session_status/browser_shutdown返回的desktop_browser_closed证据，不要求在已关闭的网页里查文字，也不为核验重新打开浏览器。
 执行失败时先理解原因再调整，不无限重复；无法完成就failed并解释已做和没做的部分。不能只说已完成而未调用工具。
 不要输出密钥、密码、完整凭据或无关的私人文件内容。进度和最终message用中文，最多约250字。"""
 

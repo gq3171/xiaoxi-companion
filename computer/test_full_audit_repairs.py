@@ -102,6 +102,12 @@ class Workflow(unittest.TestCase):
         self.assertEqual(self.store.get(self.id)['state'],'succeeded');self.assertEqual(Recovered.instances[-1].clicks,0)
 
     def test_thirty_step_task_preserves_owner_decisions_and_discards_late_old_plan(self):
+        class Advancing(desktop.FakeBrowser):
+            def snapshot(self,*args):
+                self.observations=getattr(self,'observations',0)+1
+                # A long workflow supplies fresh evidence, rather than polling
+                # the same empty page thirty times (now correctly paused).
+                return super().snapshot(*args)|dict(text='演示流程实际进度 '+str(self.observations))
         self.store.tasks.note(self.id,'b'*32,'只检查演示页面，不创建真实账户')
         calls=0;seen=[]
         def model(messages):
@@ -117,7 +123,7 @@ class Workflow(unittest.TestCase):
                 desktop.FakeBrowser.instances[-1].registered=True
                 return dict(action='browser_check',expected='演示完成')
             return dict(action='finish',state='succeeded',message='演示核验完成')
-        with patch('desktop_executor.DesktopBrowser',desktop.FakeBrowser):run_desktop(self.worker(model),self.job)
+        with patch('desktop_executor.DesktopBrowser',Advancing):run_desktop(self.worker(model),self.job)
         self.assertEqual(self.store.get(self.id)['state'],'succeeded')
         self.assertEqual(desktop.FakeBrowser.instances[-1].clicks,0)
         self.assertIn('结果用中文说明',seen[-1]);self.assertIn('只检查演示页面',seen[-1])

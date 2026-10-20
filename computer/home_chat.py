@@ -194,12 +194,13 @@ class HomeChat:
             except ValueError as error:
                 say=str(error) if str(error).startswith(('没有找到','这项任务','命令任务','请先交回')) else '这次没有恢复任务，请先核对任务状态；私密信息请用专用填写窗。'
         elif action=='computer_cancel':
-            target=answer.get('job_id')
-            with self.computer.lock:
-                row=self.computer.db.execute("SELECT id FROM jobs WHERE state IN ('queued','running') ORDER BY created DESC LIMIT 1").fetchone()
-            if not target and row:target=row['id']
-            if target and self.computer.get(target):
-                store.admit(request);job=self.computer.cancel(target);say='已经把停止请求交给电脑了。'
+            from task_status import select
+            rows=select(self.computer,answer.get('job_id'),focus=request.get('_focus_job'))
+            target=rows[0] if rows else None
+            if target and target['state'] in ('queued','running','interrupted'):
+                with self.computer.lock:
+                    store.admit(request);job=self.computer.cancel(target['id'])
+                say='原任务已经停止，不会再继续执行。' if job['state']=='cancelled' else '已经把停止请求交给电脑了。'
             else:say='现在没有找到需要停止的任务。'
         world_action=answer.get('world_action')
         if world_action and not answer.get('reminder'):
