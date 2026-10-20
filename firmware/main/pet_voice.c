@@ -7,6 +7,8 @@
 #include "pet_util.h"
 
 static const float FREQS[PET_VOICE_BANDS] = {150, 250, 350, 500, 700, 900, 1100, 1400, 1700, 2000, 2400, 2800, 3200, 3600, 4000, 4500};
+/* M_PI is a libc extension and is absent in strict C17 on some Linux hosts. */
+static const float PI = 3.14159265358979323846f;
 static float s_profile[PET_VOICE_BANDS];
 static float s_window[400];
 static bool s_loaded, s_valid;
@@ -51,7 +53,7 @@ static void normalize(float *bands)
 
 void pet_voice_measure(const int16_t *pcm, int samples, float bands[PET_VOICE_BANDS])
 {
-    if (s_window[200] == 0) for (int i = 0; i < 400; i++) s_window[i] = 0.5f - 0.5f * cosf(2 * (float)M_PI * i / 399);
+    if (s_window[200] == 0) for (int i = 0; i < 400; i++) s_window[i] = 0.5f - 0.5f * cosf(2 * PI * i / 399);
     memset(bands, 0, sizeof(float) * PET_VOICE_BANDS);
     for (int offset = 0; offset + 400 <= samples; offset += 400) {
         double energy = 0; for (int i = 0; i < 400; i++) energy += (double)pcm[offset + i] * pcm[offset + i];
@@ -59,7 +61,7 @@ void pet_voice_measure(const int16_t *pcm, int samples, float bands[PET_VOICE_BA
         for (int band = 0; band < PET_VOICE_BANDS; band++) {
             /* Hann-windowed narrow band energy; volume normalization keeps soft
              * speech comparable. This is a familiarity hint, not authentication. */
-            float coefficient = 2 * cosf(2 * (float)M_PI * FREQS[band] / PET_SAMPLE_RATE), a = 0, b = 0;
+            float coefficient = 2 * cosf(2 * PI * FREQS[band] / PET_SAMPLE_RATE), a = 0, b = 0;
             for (int i = 0; i < 400; i++) { float value = pcm[offset + i] * s_window[i] + coefficient * a - b; b = a; a = value; }
             float power = a * a + b * b - coefficient * a * b;
             bands[band] += sqrtf(fmaxf(power, 0));
