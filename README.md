@@ -1,10 +1,18 @@
 # 小溪 · Xiaoxi Companion
 
+[简体中文](README.md) | [English](README.en.md)
+
 小溪是一个有自己的名字、小屋和日常生活的 AI 桌宠。你可以叫醒她，聊聊今天发生的事，也可以请她查资料、画画、设置提醒，或在她的电脑上帮你完成一项任务。
 
 她住在 ESP32 的小屏幕里，也可以通过电脑浏览器陪着你。两端共享同一个家、身份、记忆和任务进度，换一块屏幕，仍然能接着聊。
 
 我们希望她能在相处中逐渐了解你，形成自己的偏好，在合适的时候主动关心你，也能把交代给她的事情办好。这个项目正在围绕这样的体验持续打磨，欢迎一起试用、提问题和改进。
+
+## 界面预览
+
+![小溪的房间、示例聊天和工作区](docs/screenshots/home-and-chat.png)
+
+截图使用示例对话和独立演示工作区，未连接真实账号或小板子。还可以看看[小院](docs/screenshots/courtyard.png)、[Linux 工作桌面](docs/screenshots/linux-desktop.png)和[私密填写窗](docs/screenshots/private-input.png)。[全部截图与说明](docs/screenshots/README.md)。
 
 ## 和小溪相处
 
