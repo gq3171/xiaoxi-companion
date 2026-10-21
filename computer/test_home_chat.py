@@ -364,6 +364,7 @@ class HomeChatTests(unittest.TestCase):
             self.chat.db.execute('INSERT INTO turn_epochs VALUES(?,?)',(current,self.memory.forget_epoch))
         rows=self.chat.conversation(self.session,current)
         self.assertEqual([r['owner'] for r in rows],[f'合成原话{n}' for n in range(4,12)])
+        self.assertTrue(all(r['failure']['effects']=='check_required' for r in rows))
 
     def wav(self):
         output=io.BytesIO()

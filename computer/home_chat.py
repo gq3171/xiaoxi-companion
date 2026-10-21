@@ -138,6 +138,7 @@ class HomeChat:
             reply=json.loads(row['reply']);item=dict(owner=row['text'],state=row['state'])
             if row['state']=='done':item['assistant']=short(reply.get('say',''),512)
             if reply.get('failure'):item['failure']=reply['failure']
+            elif row['state']=='failed':item['failure']=dict(stage='legacy_unknown',effects='check_required')
             identifier=reply.get('job_id') or op_id(row['id'],'job')
             job=self.computer.get(identifier)
             if job:item['task']=dict(id=job['id'],state=job['state'])
