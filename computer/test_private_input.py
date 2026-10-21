@@ -153,6 +153,9 @@ class PrivateExecutorTests(unittest.TestCase):
                     data+=store.db.execute('SELECT checkpoint FROM desktop_jobs').fetchone()[0]
                     self.assertNotIn('SYNTHETIC_PRIVATE_SENTINEL',data);self.assertNotIn('test@example.invalid',data)
                     self.assertEqual(private.pending('owner')['state'],'filled')
+                    receipt=store.db.execute("SELECT output FROM steps WHERE kind='private_input'").fetchone();self.assertIsNotNone(receipt)
+                    self.assertEqual(json.loads(receipt[0]),dict(filled=True,continuation_clicked=False,owner_approved=True))
+                    self.assertEqual(store.db.execute("SELECT verified FROM task_events WHERE action='private_input'").fetchone()[0],1)
                 finally:stop.set();thread.join(3);store.db.close()
 
 

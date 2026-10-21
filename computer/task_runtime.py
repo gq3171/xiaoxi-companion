@@ -39,7 +39,7 @@ CHECKS = {'check', 'browser_check', 'workspace_check', 'browser_session_status',
 RULES = '''\n共享任务工具（每次一个JSON动作）：
  task_history: query可选字符串、after可选步骤号、limit可选1..8，回查本任务已脱敏的真实步骤，不是全站历史。
  task_memory: summary为简洁工作摘要，steps为所引用的真实步骤号。只记录已有事实、失败尝试和待办，不得虚构主人要求。
- task_plan: plan内completion_conditions可用字符串，或{id,text,evidence:[已通过核验的步骤号]}；plan为步骤字符串或{id,text,status:pending|running|done|blocked,depends_on:[id],evidence:[步骤号]}。缺少证据的步骤不能标完成。更新计划时保留原始请求和主人补充的全部要求。
+ task_plan: 唯一规范示例 {"action":"task_plan","plan":{"completion_conditions":["已核对两页"],"plan":["打开页面","核对资料"],"next_step":"打开第一条链接","blocker":""}}。外层plan必须是对象，步骤列表在内层plan。plan内completion_conditions可用字符串，或{id,text,evidence:[已通过核验的步骤号]}；plan为步骤字符串或{id,text,status:pending|running|done|blocked,depends_on:[id],evidence:[步骤号]}。缺少证据的步骤不能标完成。更新计划时保留原始请求和主人补充的全部要求。
  长任务主动更新计划、回查丢失细节。错误后先重新观察环境，再换路线；未知操作结果只读核对，不重复发送。
  command_start: command为已授权本地命令，交给受管理进程执行并返回handle；command_status用handle查进度。只可有一个受管理命令，退出和进程清理后才算完成；不能用它绕过网页或系统权限。
  finish成功需引用实际核验，建议在evidence列出步骤号；每一项完成条件都要有对应核验。简单任务不必额外造计划。验证不全时继续做，不拿最后一次检查代替全部目标。
@@ -56,6 +56,11 @@ def validate(reply):
     action = reply['action']
     if action not in TOOLS:
         return reply
+    if action=='task_plan' and isinstance(reply.get('plan'),list):
+        # Compatibility with the observed flat model layout. Only plan fields
+        # are normalized; owner authority/evidence can never be injected here.
+        if set(reply)-{'action','message','plan','completion_conditions','next_step','blocker'}:raise ValueError('unknown task plan parameter; use {action:task_plan,plan:{completion_conditions:[],plan:[],next_step:"",blocker:""}}')
+        reply={k:v for k,v in reply.items() if k in ('action','message')}|{'plan':{k:v for k,v in reply.items() if k in ('plan','completion_conditions','next_step','blocker')}}
     fields = TOOLS[action][2]
     if set(reply) - set(fields) - {'action', 'message'}:
         raise ValueError('unknown task tool parameter')
@@ -111,6 +116,12 @@ def evidence(store, job):
                 page=value.get('page',{})
                 if isinstance(page,dict) and isinstance(page.get('text'),str):safe['visible_text']=page['text'].encode()[:4000].decode('utf8','ignore')
                 if not safe:safe={k:value[k] for k in ('text','state','exit_code') if k in value}
+                # Preserve where the successful read occurred. Otherwise the
+                # reviewer sees content but cannot substantiate the requested
+                # source, and needlessly sends the executor back to open it.
+                url=page.get('url') if isinstance(page,dict) and page.get('url') else value.get('url')
+                if isinstance(url,str) and len(url.encode())<=2048 and url.startswith(('https://','http://')):safe['observed_url']=url
+                if item['kind']=='private_input':safe={k:value[k] for k in ('filled','continuation_clicked','owner_approved') if type(value.get(k)) is bool}
                 output=json.dumps(safe,ensure_ascii=False) if safe else output
         except (ValueError,TypeError):pass
         item['output']=output.encode()[:6000].decode('utf8','ignore');result.append(item)
@@ -304,7 +315,7 @@ def control_tool(worker, job, reply, ordinal, revision, desktop=False):
     action = reply.get('action')
     if action not in TOOLS:
         return None
-    validate(reply)
+    reply=validate(reply)
     if action == 'task_plan':
         worker.store.tasks.plan(job, reply.get('plan'), revision=revision)
         return dict(plan_saved=True)

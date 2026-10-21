@@ -72,7 +72,7 @@ class Browser:
         self.job_id=job_id;self.workspace=Path(workspace);self.cancelled=cancelled
         self.tabs={};self.snapshots={};self.current=None;self.owned_targets=set()
         self.opener=build_opener(ProxyHandler({}))
-        self.ready=False;self.control=None
+        self.ready=False;self.control=None;self.requested_urls={};self.failed_origins={};self._popup_opener=None;self._nav_attempts={}
 
     def json_request(self, path, method='GET', cleanup=False):
         if self.cancelled() and not cleanup:raise BrowserCancelled('任务已停止')
@@ -120,29 +120,56 @@ class Browser:
             for _ in range(3):
                 for item in infos:
                     target=item['targetId']
-                    if target in owned or item.get('openerId') not in owned or item.get('type')!='page':continue
+                    if target in self.tabs or item.get('type')!='page':continue
+                    if target not in owned and item.get('openerId') not in owned:continue
                     owned.add(target);self.owned_targets.add(target)
                     if len(self.tabs)>=3:
                         self.control.call('Target.closeTarget',dict(targetId=target));continue
                     if target in sockets:
                         self.tabs[target]=CDP(sockets[target]['webSocketDebuggerUrl'],self.cancelled)
+                        self.tabs[target].call('Page.enable');self.tabs[target].call('Accessibility.enable')
         metadata={x['targetId']:x for x in infos}
         return [dict(tab=tab,title=metadata.get(tab,{}).get('title',''),url=metadata.get(tab,{}).get('url','')) for tab in self.tabs]
 
-    def open(self, url):
+    def open(self, url, tab=None):
         parsed=urlsplit(url)
         if parsed.scheme not in ('http','https') or not parsed.hostname or parsed.username or parsed.password:
             raise ValueError('网页地址需要无内嵌凭据的HTTP或HTTPS地址')
         self.ensure()
-        if len(self.tabs)>=3:raise BrowserNotDispatched('本任务最多三个标签，请先关闭不用的页面')
-        info=self.json_request('/json/new?about:blank','PUT');tab=info['id']
-        page=CDP(info['webSocketDebuggerUrl'],self.cancelled);self.tabs[tab]=page;self.current=tab
-        self.owned_targets.add(tab)
+        host=parsed.netloc.lower();failed=self.failed_origins.get(host,0)
+        if time.time()-failed<120:raise BrowserNotDispatched('该站点刚出现实际网络错误，请先使用可达来源或官网站内导航；稍后可重试。')
+        if tab is None:
+            if len(self.tabs)>=3:raise BrowserNotDispatched('本任务最多三个标签；可用browser_open(url,tab=本任务已有标签)在原标签导航。')
+            info=self.json_request('/json/new?about:blank','PUT');tab=info['id']
+            page=CDP(info['webSocketDebuggerUrl'],self.cancelled);self.tabs[tab]=page;self.owned_targets.add(tab)
+        else:
+            if tab not in self.tabs:raise BrowserNotDispatched('只能在本任务已有标签内导航')
+            page=self.tabs[tab]
+        self.current=tab;self.snapshots.pop(tab,None);self._popup_opener=None
+        self.requested_urls[tab]=url
         page.call('Page.enable');page.call('Accessibility.enable')
         result=page.call('Page.navigate',dict(url=url))
-        if result.get('errorText'):raise BrowserUnavailable('页面未能打开')
-        # Do not wait for every ad/resource; a following snapshot observes readiness.
+        if result.get('errorText'):
+            if 'ERR_' in result['errorText']:self.failed_origins[host]=time.time()
+            raise BrowserUnavailable('页面未能打开；请先观察当前页并换用可达来源')
         return dict(tab=tab,navigation_requested=True,verification=False)
+
+    def follow_popup(self,opener,previous,wait=0):
+        """Adopt only task-owned descendants; unrelated desktop pages stay out."""
+        if not self.control:return None
+        deadline=time.monotonic()+wait
+        while True:
+            self.list_tabs()
+            infos=self.control.call('Target.getTargets').get('targetInfos',[])
+            children={v['targetId'] for v in infos if v.get('openerId')==opener and v.get('type')=='page'}
+            new=[t for t in self.tabs if t not in previous and t in children]
+            if new:
+                self.current=new[-1];self._popup_opener=None
+                self.control.call('Target.activateTarget',dict(targetId=self.current))
+                return self.current
+            if time.monotonic()>=deadline:return None
+            if self.cancelled():raise BrowserCancelled('任务已停止')
+            time.sleep(.08)
 
     def preview_text(self,text):
         # An opaque data origin and escaped preformatted text: local HTML is
@@ -159,12 +186,18 @@ class Browser:
         return dict(tab=tab,navigation_requested=True,verification=False,scope='task_artifact_preview')
 
     def snapshot(self, tab=None):
+        if tab is None and self._popup_opener:
+            opener,previous=self._popup_opener;self.follow_popup(opener,previous)
         page=self.page(tab);tab=self.current
         before=self.document(page)
         info=page.evaluate('''({url:location.href,title:document.title,ready:document.readyState,
           text:(document.body?.innerText||'').slice(0,18000),
           password:Array.from(document.querySelectorAll('input[type="password"]')).some(x=>x.getClientRects().length>0),
           captcha:!!document.querySelector('iframe[src*="recaptcha"],iframe[src*="hcaptcha"],[class*="geetest"]')})''')
+        if str(info.get('url','')).startswith('chrome-error:'):
+            requested=self.requested_urls.get(tab,'')
+            if requested:self.failed_origins[urlsplit(requested).netloc.lower()]=time.time()
+            info.update(navigation_error=True,requested_url=requested,next_action='改用可达来源或官网站内导航，不重复打开同一失败站点')
         nodes=page.call('Accessibility.getFullAXTree',dict(depth=18)).get('nodes',[])
         if before!=self.document(page):raise BrowserUnavailable('页面在读取中跳转，请重新读取')
         serial=os.urandom(6).hex();elements=[];refs={}
@@ -195,17 +228,47 @@ class Browser:
         pass
 
     def click(self, ref, tab=None):
-        page,item=self.element(ref,tab)
-        self.snapshots.pop(self.current,None)
+        page,item=self.element(ref,tab);source=self.current
+        self.snapshots.pop(source,None)
         x,y=self.action_point(page,item)
         self.before_activate(page,item,'click')
+        link={}
+        if item['role']=='link':
+            remote=page.call('DOM.resolveNode',dict(backendNodeId=item['backend'])).get('object',{}).get('objectId')
+            try:
+                if remote:link=page.call('Runtime.callFunctionOn',dict(objectId=remote,functionDeclaration="function(){const a=this.closest('a[href]');return a?{url:a.href,target:a.target,source:location.href}:{};}",returnByValue=True)).get('result',{}).get('value') or {}
+            finally:
+                if remote:page.call('Runtime.releaseObject',dict(objectId=remote))
+        href=link.get('url','')
+        navigable=isinstance(href,str) and href.startswith(('http://','https://')) and href.split('#')[0]!=str(link.get('source','')).split('#')[0]
+        key=(source,str(link.get('source','')),href)
+        if navigable and self._nav_attempts.get(key,0)>=2:
+            error=BrowserNotDispatched('同一链接两次未观察到导航，请使用已观察到的链接地址在原标签打开或更换路线。')
+            error.navigation=dict(no_navigation=True,requested_url=href);raise error
+        if navigable and link.get('target')=='_blank' and len(self.tabs)>=3:
+            raise BrowserNotDispatched('此链接会开新标签，但任务标签已满；请在已有任务标签打开已观察到的链接地址。')
+        previous=set(self.tabs);before=self.document(page)
+        self._popup_opener=(source,previous)
         try:
             page.call('Input.dispatchMouseEvent',dict(type='mousePressed',x=x,y=y,button='left',clickCount=1))
         finally:
-            # A timeout doesn't prove the press failed to reach Chrome. Release
-            # once, propagate failure, and require observation before any retry.
             page.call('Input.dispatchMouseEvent',dict(type='mouseReleased',x=x,y=y,button='left',clickCount=1))
-        return dict(dispatched=True,verification=False)
+        value=dict(dispatched=True,verification=False,tab=source)
+        if navigable:
+            popup=self.follow_popup(source,previous,.6)
+            if popup:
+                self.requested_urls[popup]=href
+                value.update(tab=popup,opened_tab=True,navigation_observed=True)
+            else:
+                # Dispatch is not navigation evidence. URL/loader inspection is
+                # read-only and never repeats the click after a lost response.
+                destination=page.evaluate('location.href')
+                changed=isinstance(destination,str) and destination!=link.get('source') or self.document(page)!=before
+                self._nav_attempts[key]=0 if changed else self._nav_attempts.get(key,0)+1
+                value.update(navigation_observed=bool(changed),no_navigation=not changed)
+            value.update(requested_url=href,navigation_requested=True)
+            if value.get('no_navigation'):value['next_action']='browser_snapshot后核对；仍在原页时可browser_open(url=requested_url,tab=当前任务标签)，不要盲点'
+        return value
 
     def action_point(self,page,item,editable=False):
         page.call('DOM.scrollIntoViewIfNeeded',dict(backendNodeId=item['backend']))

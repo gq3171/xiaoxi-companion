@@ -35,3 +35,5 @@ python3 -m unittest discover -s firmware/tests -p 'test_runtime_core.py'
 多模型回归入口 `python3 -m unittest discover -s computer -p test_model_backends.py`，包含不调用云服务的本地 HTTP 和音频夹具。修改协议时同时检查模型/Key 路由、流结束、取消与任务执行，不只替换模型字符串。
 
 浏览器视觉回归：`python3 -m unittest discover -s computer -p test_visual_browser.py`；执行器回归还核对图片仅进入一次推理、不进入任务检查点。真正 Chromium 合成探针 `computer/visual_probe.py` 需部署代理显式在独立端口/用户目录运行，参考 DESKTOP.md，不作为普通 CI 的真实账户操作。
+
+浏览器连续任务回归：`test_browser_workflow.py` 覆盖任务相关表单、计划协议、有效 JSON 观察及执行器恢复；真实 Chromium 与可选云模型探针见 [DESKTOP.md](DESKTOP.md#浏览器任务的连续性与回归)。发布时应同时保留旧版失败和新版通过的证据，不用 mock 通过替代完整模型任务。

@@ -4,6 +4,7 @@ import json
 import re
 import secrets
 from urllib.parse import urlsplit
+from form_policy import classify, owner_requests_optional, necessary_auth
 
 from browser_tools import Browser, BrowserUnavailable, BrowserBlocked
 
@@ -19,7 +20,12 @@ _SCAN = r'''(()=>{
   options:e.tagName==='SELECT'?Array.from(e.options).slice(0,100).map((o,i)=>({index:i,label:o.label.slice(0,100),value:o.value,disabled:o.disabled})):null
  })).filter(e=>e.visible&&!['hidden','checkbox','radio','submit','button','file','image','reset','range','color'].includes(e.type));
  const buttons=Array.from(document.querySelectorAll('button,input[type=submit],input[type=button]')).map((e,index)=>({index,group:group(e),visible:visible(e),label:(e.getAttribute('aria-label')||e.innerText||e.value||'').trim().slice(0,120)})).filter(e=>e.visible);
- return {url:location.href,fields,buttons,captcha:Array.from(document.querySelectorAll('iframe[src*="recaptcha"],iframe[src*="hcaptcha"],[class*="geetest"]')).some(visible)};
+ const groups=forms.map((f,index)=>({index,id:f.id||'',name:f.getAttribute('name')||'',role:f.getAttribute('role')||'',modal:!!f.closest('[role=dialog],[aria-modal=true]'),action:f.getAttribute('action')||'',pathname:location.pathname,
+  text:(f.innerText||'').slice(0,1500),heading:Array.from(f.querySelectorAll('legend,h1,h2,h3')).map(x=>x.innerText).join(' ').slice(0,300),
+  captcha:Array.from(document.querySelectorAll('iframe[src*=recaptcha],iframe[src*=hcaptcha],[class*=geetest]')).some(x=>visible(x)&&(f.contains(x)||(!x.closest('form,footer,nav,aside')&&f.closest('main,[role=dialog]')?.contains(x)))),
+  peripheral:!!f.closest('footer,nav,aside,[role=contentinfo],[role=navigation],[role=complementary]'),
+  primary_heading:Array.from(document.querySelectorAll('h1')).filter(x=>!x.closest('footer,nav,[role=contentinfo]')).map(x=>x.innerText).join(' ').slice(0,300)}));
+ return {url:location.href,fields,buttons,groups,captcha:Array.from(document.querySelectorAll('iframe[src*="recaptcha"],iframe[src*="hcaptcha"],[class*="geetest"]')).some(visible)};
 })()'''
 
 
@@ -86,16 +92,32 @@ class PrivateBrowser:
         scan = page.evaluate(_SCAN)
         site = origin(scan['url'])
         fields = scan['fields']
-        credential = next((f for f in fields if f['type'] in ('password', 'email')
-                           or f['autocomplete'] in ('username', 'current-password', 'new-password', 'one-time-code')
-                           or re.search(r'用户名|邮箱|账号|账户|验证码|username|e.?mail|verification|one.?time', f['label'], re.I)), None)
-        registration = self.registration(page)
-        if credential is None and not registration:
-            return None
-        group = credential['group'] if credential else next((f['group'] for f in fields), -1)
+        self._private_form_status=dict(ignored_optional=False,reason='no_required_private_form')
+        candidates=[]
+        groups={g['index']:g for g in scan.get('groups',[])}
+        for group in dict.fromkeys(f['group'] for f in fields):
+            members=[f for f in fields if f['group']==group]
+            buttons=[b for b in scan['buttons'] if b['group']==group]
+            meta=groups.get(group,dict(primary_heading=''))
+            credential=next((f for f in members if f['type'] in ('password','email') or f['autocomplete'] in ('username','current-password','new-password','one-time-code') or re.search(r'用户名|邮箱|账号|账户|验证码|username|e.?mail|verification|one.?time',f['label'],re.I)),None)
+            purpose=classify(meta,members,buttons)
+            if purpose=='authentication' and not necessary_auth(meta,getattr(self,'_owner_form_intent','')):
+                self._private_form_status=dict(ignored_optional=True,reason='authentication_not_required_for_task',purpose=purpose)
+                continue
+            if purpose!='authentication' and not (purpose in ('newsletter','contact') and owner_requests_optional(getattr(self,'_owner_form_intent',''),purpose)):
+                self._private_form_status=dict(ignored_optional=True,reason='optional_form_is_not_task_prerequisite',purpose=purpose)
+                continue
+            if credential is None:credential=members[0]
+            priority=2 if any(f['type']=='password' or f['autocomplete']=='one-time-code' for f in members) else 1
+            candidates.append((priority,group,credential,purpose))
+        if not candidates:return None
+        _,group,credential,purpose=max(candidates,key=lambda x:x[0])
+        self._private_form_status=dict(ignored_optional=False,reason='required_private_form',purpose=purpose)
         selected = [f for f in fields if f['group'] == group and (f['empty'] or f['tag'] == 'select')]
         if len(selected) > 12:
             raise BrowserUnavailable('表单过大，请在真实页面核对')
+        registration=purpose=='authentication'
+        selected_captcha=groups.get(group,{}).get('captcha',scan['captcha'])
         root = page.call('DOM.getDocument', dict(depth=0))['root']['nodeId']
         nodes = page.call('DOM.querySelectorAll', dict(nodeId=root, selector=FIELD_SELECTOR))['nodeIds']
         bindings = []
@@ -105,7 +127,7 @@ class PrivateBrowser:
             identifier = secrets.token_hex(6)
             kind = ('select' if field['tag'] == 'select' else 'password' if field['type'] == 'password'
                     else 'otp' if field['autocomplete'] == 'one-time-code' or re.search(r'验证码|verification|one.?time', field['label'], re.I)
-                    else 'account' if field is credential and field['type'] != 'password' else 'text')
+                    else 'account' if field is credential and (field['type']=='email' or field['autocomplete']=='username' or re.search(r'用户名|邮箱|账号|username|e.?mail',field['label'],re.I)) else 'text')
             value = dict(id=identifier, kind=kind, label=safe_label(field['label']) or {'password': '密码', 'otp': '验证码', 'account': '账号或邮箱'}.get(kind, '网站要求的信息'))
             if kind == 'select':
                 value['options'] = [dict(id=str(o['index']), label=safe_label(o['label'])) for o in field['options'] if not o['disabled'] and o['value']]
@@ -117,7 +139,7 @@ class PrivateBrowser:
             r'(下一步|继续|登录|登入|登陆|注册|创建账户|创建账号|创建帐户|完成|提交|Next|Continue|Sign in|Log in|Sign up|Create account|Submit)\s*[>›»→]?', b['label'], re.I)), None)
         action_item = None
         login_surface=registration or any(f['type']=='password' or f['autocomplete'] in ('username','one-time-code') for f in fields) or bool(re.search(r'login|signin|sign-in|auth|account',urlsplit(scan['url']).path,re.I))
-        if action and login_surface and not scan['captcha']:
+        if action and login_surface and not selected_captcha:
             buttons = page.call('DOM.querySelectorAll', dict(nodeId=root, selector=BUTTON_SELECTOR))['nodeIds']
             action_item = self._private_node(page, buttons[action['index']])
             # Existing guards still deny payment, publication, destructive acts,
@@ -126,7 +148,7 @@ class PrivateBrowser:
             if re.search(r'确认支付|确认转账|订单总额|信用卡|付款金额|永久删除|payment|credit card|delete account',context.get('scope',''),re.I):
                 action_item=None
             else:
-                try:self.guard_activation(context,action_item['name'],False,'click')
+                try:self.guard_activation(context,action_item['name'],bool(re.search(r'create account|sign up|register|创建账户|创建账号|注册',action_item['name'],re.I)),'click')
                 except BrowserBlocked:action_item=None
         if not public and not action_item:
             return None
@@ -135,7 +157,7 @@ class PrivateBrowser:
         fingerprint = hashlib.sha256(json.dumps([document, site, group,
             [(b['item']['backend'], b['field']['type'], b['field']['name'], b['field']['id']) for b in bindings],
             action_item], sort_keys=True).encode()).hexdigest()
-        return dict(tab=self.current, document=document, url=scan['url'], origin=site, fingerprint=fingerprint,
+        return dict(tab=self.current, document=document, url=scan['url'], origin=site, fingerprint=fingerprint,purpose=purpose,group=group,
                     fields=public, bindings=bindings, action=action_item,
                     action_label=safe_label(action_item['name']) if action_item else None,
                     activation_context=self.activation_context(page,action_item) if action_item else None)
@@ -204,7 +226,9 @@ class PrivateBrowser:
             item = form['action']
             if not item:
                 raise BrowserUnavailable('没有核对过的继续按钮')
-            if page.evaluate(_SCAN).get('captcha'):
+            fresh=page.evaluate(_SCAN)
+            group=next((g for g in fresh.get('groups',[]) if g['index']==form.get('group')),None)
+            if (group.get('captcha') if group is not None else fresh.get('captcha')):
                 raise BrowserUnavailable('网站当前需要人机验证，请在真实页面完成后继续')
             context = self.activation_context(page, item)
             if any(context.get(key)!=form['activation_context'].get(key) for key in ('name','form_action','form_method','password','form')):

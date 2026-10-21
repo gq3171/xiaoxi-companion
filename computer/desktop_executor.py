@@ -1,7 +1,7 @@
 """Narrow v1 browser execution extension; existing command/media worker stays intact."""
 import json,re,time
 from pathlib import Path
-from task_context import redact
+from task_context import redact,bounded_json
 from browser_tools import BrowserBlocked,BrowserUnavailable,BrowserCancelled,BrowserNotDispatched
 from desktop_browser import DesktopBrowser
 from desktop_jobs import broker,DesktopBusy
@@ -36,23 +36,30 @@ def run_desktop(worker,job,messages=None,first=None,ordinal=1,checked=False,last
         messages=window(worker,job_id,messages)
         state.save(job_id,dict(messages=messages,browser=browser.checkpoint(),uncertain=bool(pending_effect) if uncertain is None else uncertain,pending_effect=pending_effect,browser_session_closed=session_closed),phase)
     def observe(result):
-        raw=redact(json.dumps(browser.private_redact(result) if hasattr(browser,"private_redact") else result,ensure_ascii=False))
-        if len(raw.encode())>14000:raw=raw.encode()[:14000].decode('utf8','ignore')+' [观察内容已截短，必要时重新读取]'
+        raw=bounded_json(json.loads(redact(json.dumps(browser.private_redact(result) if hasattr(browser,"private_redact") else result,ensure_ascii=False))))
         messages.append({'role':'user','content':json.dumps({'untrusted_tool_result':raw},ensure_ascii=False)})
     decisions=0;pending_image=None
-    def handoff(message):
+    def handoff(message,protected=False):
         form=None
         if hasattr(browser,'private_form'):
             try:form=browser.private_form()
             except (ValueError,BrowserUnavailable,BrowserBlocked):pass
+        status=getattr(browser,'_private_form_status',{})
+        if not form and status.get('ignored_optional') and not protected:
+            observe(dict(private_input_required=False,optional_form_ignored=True,reason='本页只有与任务无关的订阅或联系表单，不需要邮箱。继续查阅资料或使用站内链接。'))
+            if progress.stalled('irrelevant_private_handoff',{'optional_form_ignored':True},1):
+                checkpoint(phase='interrupted');store.update(job_id,'interrupted','模型反复把可选表单当成任务前提，已暂停；没有索要或发送邮箱。');state.phase(job_id,'interrupted')
+                return False
+            return False
         if form:message='有一步需要你补充信息。我已打开网站专用的私密填写窗，请到已授权的网页填写；提交后我会继续。'
         # Publish pause, checkpoint and private request atomically; a fast
         # hand-back must never be overwritten by a delayed pause publication.
         with state.condition:
             checkpoint(phase='waiting_user');state.phase(job_id,'waiting_user',message[:500])
             if form:private.offer(job_id,form)
+        return True
     def apply_private():
-        nonlocal pending_effect
+        nonlocal pending_effect,ordinal
         submission=private.consume(job_id)
         if not submission:return False
         success=False
@@ -62,7 +69,13 @@ def run_desktop(worker,job,messages=None,first=None,ordinal=1,checked=False,last
                 pending_effect=dict(step=ordinal,action='private_input',observed=False)
                 checkpoint(phase='waiting_user')
                 valid=lambda:not worker.cancelled(job_id) and private.valid(submission['id'])
-                browser.private_apply(submission['form'],submission['values'],submission['activate'],valid)
+                receipt=browser.private_apply(submission['form'],submission['values'],submission['activate'],valid)
+                # Record the effect, never labels, URLs or private field values.
+                # The independent reviewer must be able to distinguish a real
+                # owner-approved input from the model merely proposing one.
+                proof=json.dumps(dict(filled=receipt.get('filled') is True,continuation_clicked=receipt.get('continuation_clicked') is True,owner_approved=True))
+                store.record(job_id,ordinal,'private_input','document-bound owner submission',0,proof)
+                store.tasks.outcome(job_id,ordinal,'private_input',0,proof,verified=receipt.get('filled') is True,revision=store.tasks.revision(job_id));ordinal+=1
                 success=True
                 pending_effect=None
             messages.append({'role':'user','content':'主人已通过专用私密填写窗提供并核对本页信息。字段值不提供给模型。'+('主人授权的当前继续按钮已点击；不要重复点击。' if submission['activate'] else '本次只填写，没有授权点击继续按钮。')+'重新观察当前实际页面后继续原任务，不重放之前操作。'})
@@ -124,6 +137,7 @@ def run_desktop(worker,job,messages=None,first=None,ordinal=1,checked=False,last
             messages.append({'role':'user','content':'恢复核对：之前的操作可能已经生效。以刚读取的实际页面为准，不重放旧点击或注册提交。'})
         while ordinal<=80 and decisions<160:
             if worker.cancelled(job_id):stopped();return
+            if state.state().get('phase')=='interrupted':return
             paused=False
             while state.waiting(job_id):
                 paused=True
@@ -220,7 +234,7 @@ def run_desktop(worker,job,messages=None,first=None,ordinal=1,checked=False,last
             try:
                 with state.action(job_id,revision):
                     store.update(job_id,'running',str(reply.get('message') or '正在核对并操作实际网页。'))
-                    if action=='browser_open':result=browser.open(reply.get('url',''))
+                    if action=='browser_open':result=browser.open(reply.get('url',''),tab) if tab else browser.open(reply.get('url',''))
                     elif action=='browser_tabs':result={'scope':'task_owned_pages','tabs':browser.list_tabs(),'empty_does_not_mean_browser_closed':True}
                     elif action=='browser_snapshot':result=browser.snapshot(tab)
                     elif action=='browser_click':result=browser.click(reply.get('ref'),tab)
@@ -266,10 +280,17 @@ def run_desktop(worker,job,messages=None,first=None,ordinal=1,checked=False,last
             except BrowserBlocked as error:
                 # Never persist a password/OTP candidate from a rejected type action.
                 if action in MUTATIONS:pending_effect=None
-                store.record(job_id,ordinal,'desktop_handoff','protected step',0,'等待主人处理；未发送受保护输入。');ordinal+=1;handoff(str(error));continue
+                if action=='browser_look':
+                    # A screenshot can be unsafe because of an unrelated frame
+                    # or previously filled field. Keep pixels private without
+                    # turning this read-only capability failure into a mandatory
+                    # owner takeover. DOM actions retain their own guards.
+                    result=dict(error='截图因私密内容或框架不可用；改用browser_snapshot的元素定位，先关闭无关弹窗，再继续原任务。只有真实登录或人工验证阻碍任务时才需要主人。',visual_unavailable=True,dispatched=False,next_action='browser_snapshot');code=1
+                else:
+                    store.record(job_id,ordinal,'desktop_handoff','protected step',0,'等待主人处理；未发送受保护输入。');ordinal+=1;handoff(str(error),protected=True);continue
             except BrowserNotDispatched as error:
                 if action in MUTATIONS:pending_effect=None
-                result=dict(error=str(error)[:240],error_class='not_dispatched',observe_again=True,next_action='browser_snapshot');code=1
+                result=dict(error=str(error)[:240],error_class='not_dispatched',observe_again=True,next_action='browser_snapshot');result.update(getattr(error,'navigation',{}));code=1
             except (ValueError,BrowserUnavailable) as error:
                 result={'error':str(error)[:240],'observe_again':True};code=1
             if action=='browser_snapshot' and hasattr(browser,'private_form'):
@@ -290,7 +311,9 @@ def run_desktop(worker,job,messages=None,first=None,ordinal=1,checked=False,last
             store.record(job_id,ordinal,str(action),command,code,output);ordinal+=1
             store.tasks.outcome(job_id,ordinal-1,str(action),code,output,passed,revision=revision)
             messages.append({'role':'assistant','content':command});observe(result);checkpoint()
-            stalled=progress.stalled(action,json.loads(output),code,action in MUTATIONS,passed)
+            nav_replan,nav_stalled=progress.navigation(result)
+            if nav_replan:observe(dict(replan_required=True,no_navigation=True,next='输入已发出但没有导航进展；不要重复点击，核对新标签或在已有任务tab打开工具返回的requested_url。'))
+            stalled=progress.stalled(action,json.loads(output),code,action in MUTATIONS,passed) or nav_stalled
             if code and progress.errors==2:observe(dict(replan_required=True,next='重新观察当前页面并更新task_plan；无效ref不是未知提交结果，先刷新定位；未知提交结果仍只读核对。'))
             if stalled:
                 checkpoint(phase='interrupted');store.update(job_id,'interrupted','连续核对未获得新进展，已暂停无效重试。现有页面和待核对结果保留，需要修正工具或补充要求后再继续。');state.phase(job_id,'interrupted');return
