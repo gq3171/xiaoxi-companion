@@ -154,7 +154,7 @@ def failure_category(error):
     if code in (401, 403): return 'authentication'
     if code == 429: return 'rate_limit'
     if isinstance(error, Deferred): return 'deferred'
-    if isinstance(error, TimeoutError): return 'timeout'
+    if isinstance(error, TimeoutError) or isinstance(getattr(error,'reason',None), TimeoutError): return 'timeout'
     if type(error).__name__ == 'Conflict': return 'stale_or_cancelled'
     if isinstance(error, (BrokenPipeError, ConnectionResetError)): return 'disconnected'
     if isinstance(error, ValueError): return 'invalid_or_incomplete'

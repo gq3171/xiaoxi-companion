@@ -216,6 +216,155 @@ class HomeChatTests(unittest.TestCase):
     def test_model_cannot_create_reminder_without_explicit_owner_request(self):
         self.provider.responses=[dict(input='direct',remember=False,action='speak',say='已设好',reminder=dict(text='看看我',due='2099-01-01 00:00'))]
         self.start('你好呀');self.assertIn('没有保存',self.finished()['reply']['say']);self.assertEqual(self.world.reminders.active(),[])
+    def test_timeout_retains_session_inbox_for_retry_without_owner_memory(self):
+        from unittest.mock import patch
+        request='请用浏览器查询测试厂商的官网新品'
+        with patch.object(self.provider,'complete',side_effect=TimeoutError('PRIVATE_ERROR_SENTINEL')):
+            failed=self.start(request);row=self.finished()
+        self.assertEqual(row['state'],'failed');self.assertEqual(row['reply']['failure'],dict(stage='model',category='timeout',effects='not_started'))
+        self.assertIn('尚未进入',row['reply']['say']);self.assertNotIn('PRIVATE_ERROR_SENTINEL',json.dumps(row))
+        self.assertEqual(self.memory.db.execute('SELECT count(*) FROM archive').fetchone()[0],0)
+        calls=[]
+        def complete(system,messages,**kwargs):
+            calls.append(messages)
+            return json.dumps(dict(input='direct',remember=False,action='computer_task',task=request,say='好'))
+        with patch.object(self.provider,'complete',side_effect=complete):
+            self.start('那你再试试吧');done=self.finished()
+        inbox=next(json.loads(m['content'])['recent_web_turns'] for m in calls[0] if 'recent_web_turns' in m['content'])
+        self.assertEqual(inbox[-1]['owner'],request);self.assertEqual(inbox[-1]['state'],'failed')
+        self.assertEqual(json.loads(calls[0][-1]['content'])['candidate'],'那你再试试吧')
+        self.assertEqual(done['reply']['job_state'],'queued')
+        self.assertEqual(self.computer.get(done['reply']['job_id'])['goal'],request)
+        self.assertFalse(self.memory.db.execute('SELECT 1 FROM archive WHERE op_id=?',(home_chat.op_id(failed['id'],'add:user'),)).fetchone())
+
+    def test_browser_route_repair_submits_once_and_keeps_literal_origin(self):
+        self.provider.responses=[dict(input='direct',action='search',query='测试厂商新品'),dict(input='direct',action='computer_task',task='用浏览器访问测试厂商官网，核对新品')]
+        data=self.start('你用浏览器查询看看');row=self.finished()
+        self.assertEqual(self.provider.calls,2);self.assertEqual(row['reply']['job_state'],'queued')
+        self.chat.start(self.session,data)
+        self.assertEqual(self.computer.db.execute('SELECT count(*) FROM jobs').fetchone()[0],1)
+        self.assertEqual(self.computer.tasks.snapshot(row['reply']['job_id'])['original_request'],data['text'])
+
+    def test_browser_route_failure_never_claims_verification_or_starts_search(self):
+        from unittest.mock import patch
+        self.provider.responses=[dict(input='direct',action='speak',say='官网已经查过，新品是测试甲')]*2
+        with patch.object(self.provider,'search',side_effect=AssertionError('must not replace browser with search')):
+            self.start('请你去看看测试厂商的主页最近有新品吗');row=self.finished()
+        self.assertEqual(row['state'],'failed');self.assertEqual(row['reply']['failure']['category'],'route_missing')
+        self.assertNotIn('测试甲',row['reply']['say']);self.assertEqual(self.computer.db.execute('SELECT count(*) FROM jobs').fetchone()[0],0)
+
+    def test_failed_browser_retry_still_enforces_original_method(self):
+        from unittest.mock import patch
+        with patch.object(self.provider,'complete',side_effect=TimeoutError()):
+            self.start('请用浏览器查询测试主页');self.finished()
+        self.provider.responses=[dict(input='direct',action='speak',say='我已经查过了'),dict(input='direct',action='computer_task',task='用浏览器查询测试主页')]
+        self.start('再试试');row=self.finished()
+        self.assertEqual(row['reply']['job_state'],'queued');self.assertEqual(self.provider.calls,2)
+
+    def test_inbox_is_bounded_session_local_and_does_not_restore_forgotten_turns(self):
+        from unittest.mock import patch
+        with patch.object(self.provider,'complete',side_effect=TimeoutError()):
+            data=self.start('PRIVATE_INBOX_SENTINEL');self.finished()
+        self.assertEqual(self.chat.conversation('foreign', 'f'*32),[])
+        turn='c'*32
+        with self.chat.lock,self.chat.db:
+            self.chat.db.execute('INSERT INTO turns VALUES(?,?,?,?,?,?,?,?)',(turn,self.session,'fixture','下一句','working','{}','',int(time.time())))
+            self.chat.db.execute('INSERT INTO turn_epochs VALUES(?,?)',(turn,self.memory.forget_epoch))
+        self.assertEqual(self.chat.conversation(self.session,turn)[0]['owner'],'PRIVATE_INBOX_SENTINEL')
+        self.chat._forget(self.memory.forget_epoch+1)
+        self.assertEqual(self.chat.conversation(self.session,turn),[])
+        self.assertNotIn('PRIVATE_INBOX_SENTINEL',json.dumps(self.chat.history(self.session)))
+
+    def test_failed_inbox_survives_restart_but_same_turn_is_never_replayed(self):
+        from unittest.mock import patch
+        with patch.object(self.provider,'complete',side_effect=TimeoutError()):
+            data=self.start('请用浏览器查询测试主页');self.finished()
+        self.chat.close();self.chat=home_chat.HomeChat(self.world,self.brain,self.computer,self.chat.path);self.world.chat=self.chat
+        self.chat.start(self.session,data);self.assertEqual(self.provider.calls,0)
+        self.provider.responses=[dict(input='direct',action='computer_task',task='用浏览器查询测试主页')]
+        self.start('再试试');self.assertEqual(self.finished()['reply']['job_state'],'queued')
+
+    def test_submission_rejection_is_distinct_from_model_or_execution_failure(self):
+        from unittest.mock import patch
+        self.provider.responses=[dict(input='direct',action='computer_task',task='合成任务')]
+        with patch.object(self.computer,'submit',side_effect=ValueError('PRIVATE_INTERNAL_ERROR')):
+            self.start('做个合成任务');row=self.finished()
+        self.assertEqual(row['state'],'failed');self.assertEqual(row['reply']['failure']['stage'],'submit')
+        self.assertEqual(row['reply']['failure']['effects'],'not_started');self.assertNotIn('PRIVATE_INTERNAL_ERROR',json.dumps(row))
+        self.assertNotIn('job_id',row['reply'])
+
+    def test_lost_submit_ack_exposes_existing_job_instead_of_inviting_duplicate(self):
+        from unittest.mock import patch
+        original=self.computer.submit
+        def lost(*args,**kwargs):
+            original(*args,**kwargs);raise OSError('synthetic lost acknowledgement')
+        self.provider.responses=[dict(input='direct',action='computer_task',task='合成任务')]
+        with patch.object(self.computer,'submit',side_effect=lost):
+            self.start('做个合成任务');row=self.finished()
+        self.assertEqual(row['reply']['failure']['effects'],'submitted');self.assertEqual(row['reply']['job_state'],'queued')
+        self.assertEqual(self.chat.focus(self.session),row['reply']['job_id']);self.assertIn('已经提交',row['reply']['say'])
+
+    def test_uncertain_effect_retry_cannot_create_a_new_job(self):
+        from unittest.mock import patch
+        with patch.object(self.chat,'actions',side_effect=OSError('synthetic unknown result')):
+            self.start('做个合成任务');row=self.finished()
+        self.assertEqual(row['reply']['failure']['effects'],'check_required')
+        self.provider.responses=[dict(input='direct',action='computer_task',task='不应重复操作')]
+        self.start('再试试');row=self.finished()
+        self.assertIn('先不重复执行',row['reply']['say']);self.assertFalse(self.computer.db.execute('SELECT 1 FROM jobs').fetchone())
+        proposals=self.memory.db.execute('SELECT proposal,accepted FROM companion_turns').fetchall()
+        self.assertFalse(any(accepted and json.loads(raw).get('action')=='computer_task' for raw,accepted in proposals))
+
+    def test_empty_search_does_not_generate_fabricated_recent_facts(self):
+        self.provider.responses=[dict(input='direct',action='search',query='测试新品'),dict(input='direct',action='speak',say='虚构已上市')]
+        self.start('查查测试新品');row=self.finished()
+        self.assertIn('没有拿到可核验',row['reply']['say']);self.assertEqual(self.provider.calls,1)
+        self.assertNotIn('虚构已上市',row['reply']['say'])
+
+    def test_assistant_claim_and_owner_brand_keep_separate_attribution(self):
+        from unittest.mock import patch
+        self.provider.responses=[dict(input='direct',action='speak',say='测试品牌甲的型号七')]
+        self.start('我用的是测试品牌乙的型号一');self.finished()
+        calls=[]
+        def complete(system,messages,**kwargs):
+            calls.extend(messages);return json.dumps(dict(input='direct',action='speak',say='我刚才把品牌说错了。'))
+        with patch.object(self.provider,'complete',side_effect=complete):self.start('你说的品牌不对');self.finished()
+        inbox=next(json.loads(m['content'])['recent_web_turns'] for m in calls if 'recent_web_turns' in m['content'])
+        self.assertEqual(inbox[-1]['owner'],'我用的是测试品牌乙的型号一')
+        self.assertEqual(inbox[-1]['assistant'],'测试品牌甲的型号七')
+
+    def test_lost_ack_retry_observes_same_job_even_if_model_proposes_new_one(self):
+        from unittest.mock import patch
+        original=self.computer.submit
+        def lost(*args,**kwargs):original(*args,**kwargs);raise OSError()
+        self.provider.responses=[dict(input='direct',action='computer_task',task='合成任务')]
+        with patch.object(self.computer,'submit',side_effect=lost):self.start('做个合成任务');first=self.finished()
+        self.provider.responses=[dict(input='direct',action='computer_task',task='不得重复创建')]
+        self.start('再试试');row=self.finished()
+        self.assertEqual(row['reply']['job_id'],first['reply']['job_id'])
+        self.assertEqual(self.computer.db.execute('SELECT count(*) FROM jobs').fetchone()[0],1)
+
+    def test_retry_model_timeout_does_not_erase_uncertain_effect_fence(self):
+        from unittest.mock import patch
+        with patch.object(self.chat,'actions',side_effect=OSError()):self.start('合成请求');self.finished()
+        with patch.object(self.provider,'complete',side_effect=TimeoutError()):self.start('再试试');row=self.finished()
+        self.assertEqual(row['reply']['failure']['effects'],'check_required')
+        self.provider.responses=[dict(input='direct',action='computer_task',task='不得重做')]
+        self.start('再试试');row=self.finished()
+        self.assertIn('先不重复执行',row['reply']['say']);self.assertFalse(self.computer.db.execute('SELECT 1 FROM jobs').fetchone())
+
+    def test_inbox_window_keeps_latest_eight_without_crossing_current_turn(self):
+        current='f'*32
+        with self.chat.lock,self.chat.db:
+            for n in range(12):
+                identifier=f'{n+1:032x}'
+                self.chat.db.execute('INSERT INTO turns VALUES(?,?,?,?,?,?,?,?)',(identifier,self.session,'fixture',f'合成原话{n}','failed','{}','',int(time.time())))
+                self.chat.db.execute('INSERT INTO turn_epochs VALUES(?,?)',(identifier,self.memory.forget_epoch))
+            self.chat.db.execute('INSERT INTO turns VALUES(?,?,?,?,?,?,?,?)',(current,self.session,'fixture','本轮','working','{}','',int(time.time())))
+            self.chat.db.execute('INSERT INTO turn_epochs VALUES(?,?)',(current,self.memory.forget_epoch))
+        rows=self.chat.conversation(self.session,current)
+        self.assertEqual([r['owner'] for r in rows],[f'合成原话{n}' for n in range(4,12)])
+
     def wav(self):
         output=io.BytesIO()
         with wave.open(output,'wb') as w:w.setnchannels(1);w.setsampwidth(2);w.setframerate(16000);w.writeframes(b'\0\0'*8000)

@@ -9,6 +9,7 @@ from pathlib import Path
 
 ID=re.compile('[0-9a-f]{32}')
 class ChatBusy(ValueError):pass
+class SubmissionRejected(ValueError):pass
 
 def encode(v):return json.dumps(v,ensure_ascii=False,separators=(',',':'),allow_nan=False)
 def short(v,n=1024):return str(v).encode()[:n].decode('utf-8','ignore')
@@ -114,13 +115,36 @@ class HomeChat:
         return rows
     def focus(self,session):
         with self.lock:
-            rows=self.db.execute("SELECT reply FROM turns WHERE session=? AND state='done' ORDER BY created DESC,rowid DESC LIMIT 24",(session,)).fetchall()
+            rows=self.db.execute("SELECT reply FROM turns WHERE session=? AND state IN ('done','failed','interrupted') ORDER BY created DESC,rowid DESC LIMIT 24",(session,)).fetchall()
         for row in rows:
             identifier=json.loads(row[0]).get('job_id')
             if identifier:
                 job=self.computer.get(identifier)
                 if job and job['state'] in ('queued','running','interrupted'):return identifier
         return None
+    def conversation(self,session,turn):
+        """Epoch-bound, session-local inbox; never promotes failures to owner memory.
+
+        Include successful attribution alongside failures, so an assistant's
+        mistaken claim cannot silently turn into an owner-provided fact.
+        """
+        self.history(session)  # Honor authoritative erasure of admitted copies.
+        with self.lock:
+            rows=self.db.execute("""SELECT t.* FROM turns t JOIN turn_epochs e ON e.id=t.id
+                WHERE t.session=? AND t.text!='' AND e.epoch=? AND t.rowid<(SELECT rowid FROM turns WHERE id=?)
+                AND t.created>? ORDER BY t.rowid DESC LIMIT 8""",(session,self.brain.store.forget_epoch,turn,int(time.time())-86400)).fetchall()
+        result=[]
+        for row in reversed(rows):
+            reply=json.loads(row['reply']);item=dict(owner=row['text'],state=row['state'])
+            if row['state']=='done':item['assistant']=short(reply.get('say',''),512)
+            if reply.get('failure'):item['failure']=reply['failure']
+            identifier=reply.get('job_id') or op_id(row['id'],'job')
+            job=self.computer.get(identifier)
+            if job:item['task']=dict(id=job['id'],state=job['state'])
+            if row['state']=='interrupted':item['failure']=dict(stage='interrupted',effects='check_required')
+            result.append(item)
+        return result
+
     def envelope(self,session,turn):
         with self.lock:row=self.db.execute('SELECT epoch FROM turn_epochs WHERE id=?',(turn,)).fetchone()
         epoch=row[0] if row else self.brain.store.forget_epoch
@@ -128,7 +152,7 @@ class HomeChat:
     def mutate(self,store,request,turn,kind,**fields):
         return store.mutate(request|dict(operation=dict(op_id=op_id(turn,kind),kind=kind.split(':')[0],**fields)))
     def run(self,session,turn,text,microphone):
-        store,request=self.envelope(session,turn)
+        store,request=self.envelope(session,turn);stage='model';reply=None;recent=[]
         try:
             with self.world.lock:self.world.life.last_engaged=self.world.clock()
             shared=self.world.snapshot();state={'channel':'web','input':'主人主动点击网页麦克风并确认发送' if microphone else '主人在已授权网页主动输入','room':{'activity':shared['activity'],'position':shared['wire'][:2]},'world':shared.get('world'),'time_beijing':__import__('datetime').datetime.fromtimestamp(time.time(),__import__('datetime').timezone(__import__('datetime').timedelta(hours=8))).strftime('%Y-%m-%d %H:%M:%S'),'reminders':self.world.reminders.active(),'recent_reminders':self.world.reminders.recent(),'capabilities':'共同世界已支持小猫和小院。明确去小院、回家、摸小猫、添猫饭时action=speak并附world_action=yard|home|catpet|catfeed；先实际保存/执行再确认。睡觉、洗漱、工作会先回家；当前位置与小猫状态见world。仅要求设提醒时不要立刻执行world_action。不编造未去过的地点。当前网页版支持真实持久定时提醒：创建用reminder={text,due:YYYY-MM-DD HH:MM,repeat_minutes:0,delivery:local|body|both,delivery_request:当前用户原句中明确指定目的端的片段}；默认local，绑定发起的这个网页，网页关闭/断线后在原网页恢复时补送，不转移到板子或其他电脑。只有主人本句明确要求在家里小板子提醒时用body，明确同时在网页和板子提醒时用both；跨端必须附原句中完整肯定的delivery_request片段，否定或含糊时不跨端，不接受旧对话授权。；支持list_reminders/cancel_reminder+reminder_id。用户说5分钟后喊我也是创建提醒，按服务端北京时间理解，不要回答做不到。追问还要多久、刚才是否提醒时使用list_reminders，结合reminders和recent_reminders区分未到点/到点待播/客户端已播完/仅屏幕确认；播放完成回报不表示主人实际听到，不因待办为空就说没有安排过。当前可文字/语音对话、查询资料、单个home_action(roam/rest/wake/wash/work/window)、computer_task/computer_cancel/computer_status。不支持板端电源/熄屏、连续life_plan或life_control、媒体展示控制；不要宣称已执行这些。电脑操作沿用原有权限与限制，不能绕过。'}
@@ -136,14 +160,37 @@ class HomeChat:
             if focus:request['_focus_job']=focus
             state['task_protocol']=2
             state['capabilities']+=' 支持computer_resume和computer_update；附当前job_id，task_note须引用本轮主人明确补充的原句。已有任务补充条件或继续必须沿用原任务，不另建任务。'
-            endpoint=copy.copy(self.brain);endpoint.store=store
+            recent=self.conversation(session,turn)
+            endpoint=copy.copy(self.brain);endpoint.store=store;endpoint._recent_web_turns=recent
             result=endpoint.model(request|dict(kind='dialogue',candidate=text,microphone=False,system=encode(state)))
             answer=json.loads(result['text']);store.admit(request)
             if answer.get('input','direct')!='direct' or answer.get('action')=='ignore':answer=dict(say='刚才这句我没弄清楚，你可以换个说法。',action='speak',remember=False)
+            from interaction import retry_request
+            original_request=text;observed_job=None
+            if recent and retry_request(text) and (recent[-1].get('task') or recent[-1].get('failure',{}).get('effects')=='check_required'):
+                # A new turn ID must not turn an uncertain old effect into a
+                # duplicate operation. Observe an existing job, never replay it.
+                job=recent[-1].get('task')
+                if job:
+                    observed_job=self.computer.get(job['id'])
+                    say=endpoint.computer_status(dict(job_id=job['id']))
+                else:say='上一条操作的结果还需要核对，我先不重复执行。请告诉我要核对哪项任务或提醒。'
+                answer=dict(action='speak',remember=False,say=say)
+            elif retry_request(text):
+                # Keep the original literal authority with the new retry; a
+                # model's task paraphrase alone is not the owner's request.
+                for prior in reversed(recent):
+                    if prior['state']!='failed' or prior.get('failure',{}).get('effects')!='not_started':break
+                    if not retry_request(prior['owner']):
+                        original_request=prior['owner']+'\n主人本轮确认：'+text;break
+            stage='accept'
             source=self.mutate(store,request,turn,'add:user',role='user',text=text,owner=answer.get('remember') is True)
             trace=answer.get('_trace','')
             if ID.fullmatch(trace):self.mutate(store,request,turn,'feedback:accepted',trace=trace,stage='accepted',source_id=source['result'])
-            reply=self.actions(store,request,turn,answer,text)
+            stage='actions'
+            reply=self.actions(store,request,turn,answer,text,original_request=original_request)
+            if observed_job:reply.update(job_id=observed_job['id'],job_state=observed_job['state'])
+            stage='delivery'
             store.admit(request)
             with self.world.lock:
                 store.admit(request);self.world.web_caption=reply.get('say','');self.world.web_caption_until=self.world.monotonic()+20;self.world.web_caption_epoch=store.epoch
@@ -151,14 +198,43 @@ class HomeChat:
             with self.lock:
                 if store.epoch!=self.brain.store.forget_epoch:raise ValueError('chat memory changed')
                 self.db.execute("UPDATE turns SET state='done',reply=?,trace=? WHERE id=?",(encode(reply),trace,turn));self.db.execute("UPDATE turns SET text='',reply='{}',trace='' WHERE id IN (SELECT id FROM turns ORDER BY created DESC,rowid DESC LIMIT -1 OFFSET 64)");self.db.execute('DELETE FROM turns WHERE created<? AND state!=\'working\'',(int(time.time())-90*86400,));self.db.commit()
-        except Exception:
-            # No provider exception, transcript or token enters a log/error response.
-            with self.lock:self.db.execute("UPDATE turns SET state='failed',reply=? WHERE id=?",(encode(dict(say='这次没能接上，你可以稍后再跟我说。已提交的任务不会自动重做。')),turn));self.db.commit()
+        except Exception as error:
+            from runtime_support import failure_category
+            from interaction import DialogueContractError
+            category='route_missing' if isinstance(error,DialogueContractError) else failure_category(error)
+            # No exception text, transcript or credential enters diagnostics.
+            # A persisted job wins over an exception after submit/ack loss.
+            try:job=self.computer.get(op_id(turn,'job'))
+            except Exception:job=None
+            if isinstance(error,SubmissionRejected):stage='submit'
+            effects='check_required' if stage in ('actions','delivery') else 'not_started'
+            from interaction import retry_request
+            if recent and retry_request(text):
+                previous=recent[-1]
+                if previous.get('task'):
+                    try:job=self.computer.get(previous['task']['id']) or job
+                    except Exception:pass
+                elif previous.get('failure',{}).get('effects')=='check_required':effects='check_required'
+            failure=dict(stage=stage,category=category,effects=effects)
+            if job:
+                failure['effects']='submitted'
+                say='任务已经提交给电脑，但这次回复没能完成。我会保留原任务，不重复创建；可以问我当前进度。'
+            elif stage=='model' and effects=='not_started':
+                say=('这次模型回复超时了' if category=='timeout' else '这次没能完成理解')+'，尚未进入任务提交或执行。你的要求还在，可以说“再试试”。'
+            elif effects=='check_required':say='这次操作的回执没有完成，实际结果需要核对；我先不自动重做。'
+            else:say='这次没有完成任务提交，你的要求还在，可以说“再试试”。'
+            failed=dict(say=say,failure=failure)
+            if job:failed.update(job_id=job['id'],job_state=job['state'])
+            elif isinstance(reply,dict) and reply.get('job_id'):failed.update(job_id=reply['job_id'],job_state=reply.get('job_state',''))
+            with self.lock:
+                # A revoked/forgotten turn must not resurrect text or a caption.
+                if store.epoch==self.brain.store.forget_epoch:
+                    self.db.execute("UPDATE turns SET state='failed',reply=? WHERE id=?",(encode(failed),turn));self.db.commit()
         finally:
             with self.lock:
                 self.threads.discard(threading.current_thread())
                 if self.closed and not self.threads:self.db.close()
-    def actions(self,store,request,turn,answer,candidate):
+    def actions(self,store,request,turn,answer,candidate,original_request=None):
         action=answer.get('action','speak');say=short(answer.get('say',''),4096);job=None
         if answer.get('reminder'):
             with self.lock:created=self.db.execute('SELECT created FROM turns WHERE id=?',(turn,)).fetchone()[0]
@@ -181,12 +257,15 @@ class HomeChat:
             say='这个操作网页版暂时还没接好，我先不改动原来的安排。'
         elif action=='computer_task':
             goal=answer.get('task');store.admit(request)
-            if not isinstance(goal,str) or not goal.strip() or len(goal.encode())>1024:raise ValueError('invalid task')
+            if not isinstance(goal,str) or not goal.strip() or len(goal.encode())>1024:raise SubmissionRejected('invalid task')
             try:
-                job=self.computer.submit(op_id(turn,'job'),goal,original_request=candidate)
+                job=self.computer.submit(op_id(turn,'job'),goal,original_request=original_request if original_request is not None else candidate)
                 with self.computer.lock:busy=self.computer.db.execute("SELECT 1 FROM jobs WHERE state='running' AND id!=?",(job['id'],)).fetchone()
                 say='好呀，已排进队列，前面的任务结束后接着做。你可以继续和我聊。' if busy else '好呀，我去弄。你可以继续和我聊。'
-            except ValueError:say='这次没有提交成功，可能队列已满；我先保留当前任务，请查看任务状态。'
+            except ValueError:
+                stage_job=self.computer.get(op_id(turn,'job'))
+                if stage_job:job=stage_job;say='任务已经交给电脑，我先核对原任务，不重复创建。'
+                else:raise SubmissionRejected('task not admitted') from None
         elif action in ('computer_resume','computer_update'):
             from task_control import control
             note=answer.get('task_note',candidate if action=='computer_update' else '')

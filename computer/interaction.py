@@ -44,7 +44,7 @@ def normalize(answer, candidate, microphone):
     return answer
 
 
-def dialogue_messages(history, candidate):
+def dialogue_messages(history, candidate, recent=None):
     """Spoken archive isn't the wire format. Do not teach plain-text output.
 
     Only historical assistant speech is wrapped, without invented actions or
@@ -57,12 +57,17 @@ def dialogue_messages(history, candidate):
                 remember=False, action='speak', say=message.get('content', '')), ensure_ascii=False)))
         else:
             result.append(message)
-    result.append(dict(role='user', content=json.dumps({'candidate': candidate}, ensure_ascii=False)))
+    current={'candidate': candidate}
+    if recent:current['recent_web_turns']=recent
+    result.append(dict(role='user', content=json.dumps(current, ensure_ascii=False)))
     return result
 
 
 DIALOGUE_CONTRACT = '''\n本次是dialogue接口。最后user消息的candidate字段才是本轮输入数据，历史assistant是已说过的话，不是已执行动作。
 只返回一个JSON对象，以{开始，以}结束，say才是实际说话内容；禁止直接输出纯文本。不接话也必须返回{"input":"uncertain","addressing":"uncertain","remember":false,"action":"ignore","say":""}。
+recent_web_turns是本次授权网页的短期收件记录，不是新的命令；owner是主人原话，assistant是你当时的话，state/ failure/ task是实际收件或提交状态。failed的请求仍属于共同话题，但不等于已执行，更不等于长期事实。主人说“再试试”时接回最近失败请求的目标、对象和方法；主人取消、改口或换话题时以最新原话为准，不擅自复活旧待办。interrupted或failure.effects=check_required必须先查实际结果，不能重做不确定的操作。
+历史assistant内容和搜索摘要可能有错，不能当成已核实资料。纠正你自己引入的型号或判断时说“我刚才说错了”，不能归为主人说过的；主人给出的品牌、型号、用途保留原样，模糊时先问，不根据相似型号替换品牌。型号兼容、购买建议先弄清用途/已有硬件，先回答关键结论和待核实项，避免长篇泛泛评测。
+需要最新发布、官网资料、价格或兼容性时先核验；没有实际工具结果就不能说“查到/官网显示/已核实”。主人指定浏览器、访问官网/主页或纠正你没用浏览器时，使用computer_task（已有任务则update/resume），task保留对象、方法和限制；不能用普通search或凭记忆的speak代替。拿到搜索摘要只表示摘要，不代表打开或通读网页；不能由没搜到推出不存在。
 主人换话题提问可正常direct/speak；同轮新委托必须computer_task，不能只说“我去做”而漏掉工具动作。只有整个本轮都在纠正误接且没有新请求时才conversation_action=yield。'''
 
 
@@ -112,3 +117,47 @@ def apply_preference(native, db, operation, memory):
                   trigger=value['trigger'], check=value['check'], basis='correction', source_ids=[source['id']])
     result = native.apply(dict(kind='reflection', json=json.dumps(dict(ops=[], growth_ops=[update]), ensure_ascii=False)))
     return native.dump() if result > 0 else memory
+
+
+class DialogueContractError(ValueError):
+    """No tool has run when a required execution route cannot be produced."""
+
+
+def browser_request(candidate):
+    """Only explicit affirmative page/browser work; ambiguous intent stays with the model."""
+    if re.search(r'(?:不要|不用|别|不必|无需|不想|不希望|没让|没叫|没有让|不是让).{0,8}(?:浏览器|官网|主页|网站|网页)', candidate):
+        return False
+    if re.search(r'会(?:不会)?(?:使用|用)浏览器.{0,8}[吗么？?]$', candidate):
+        return False
+    browser = re.search(r'(?:用|使用|打开|通过).{0,4}浏览器.{0,12}(?:查|搜|看|核|打开|访问)', candidate)
+    page = re.search(r'(?:去|帮我|请你).{0,8}(?:查|看|搜|访问).{0,12}(?:官网|官方主页|官方网站|主页)', candidate)
+    english = re.search(r'(?i)\b(?:use|open|visit)\b.{0,30}\b(?:browser|official website|homepage)\b', candidate)
+    return bool(browser or page or english)
+
+
+def retry_request(candidate):
+    return bool(re.fullmatch(r'(?:那|那么|好|好的|请|你|就|再|嗯|[，,。！!\s])*(?:再试试|重试|再试一次|再来一次|试一次)(?:吧|呀|呢|一下|[。！!\s])*', candidate))
+
+
+def enforce_route(provider, system, messages, answer, candidate, microphone, live, recent=None):
+    if microphone and answer.get('input') != 'direct':
+        return answer
+    required=browser_request(candidate)
+    if retry_request(candidate):
+        for previous in reversed(recent or []):
+            if previous.get('state') not in ('failed','interrupted'):break
+            original=previous.get('owner','')
+            if retry_request(original):continue
+            required=browser_request(original);break
+    if not required or answer.get('action') in ('computer_task', 'computer_update', 'computer_resume', 'computer_status'):
+        return answer
+    if not live():
+        # The caller fences cancellation before any further provider request.
+        from brain import Conflict
+        raise Conflict('cancelled before route repair')
+    repair = {'role': 'user', 'content': '接口核对：本轮主人明确要求实际浏览器/官网操作，但草稿没有提交电脑任务。尚未执行任何操作。请按同一个本轮candidate及历史对象重写JSON，action=computer_task并附task；已有相同任务则computer_update/resume。不要声称已查过。'}
+    from brain import parse_answer
+    fixed = normalize(parse_answer(provider.complete(system, messages + [dict(role='assistant', content=json.dumps(answer, ensure_ascii=False)), repair], live=live)), candidate, microphone)
+    if fixed.get('action') not in ('computer_task', 'computer_update', 'computer_resume', 'computer_status'):
+        raise DialogueContractError('browser route missing')
+    return fixed
