@@ -36,13 +36,15 @@ def validate(options):
     if not voice_valid(result['speech']['default_voice']):raise ValueError('invalid default voice ID')
     bounds={'tasks.context_bytes':(8192,65536),'tasks.completion_rounds':(1,5),'tasks.queue_limit':(1,32),'tasks.command_timeout_seconds':(30,1800),'tasks.skill_active_limit':(16,256),'tasks.skill_select_limit':(1,8),'speech.openai_pcm_rate':(8000,48000),'llm.timeout_seconds':(5,120),'llm.dialogue_max_tokens':(256,65536),'llm.reflection_max_tokens':(256,65536),
             'desktop.cdp_port':(1024,65535),'desktop.probe_cdp_port':(1024,65535),'desktop.max_fps':(1,30),
-            'desktop.headless_idle_seconds':(30,86400),'web.preview_port':(1024,65535),
+            'desktop.search_timeout_seconds':(2,20),'desktop.headless_idle_seconds':(30,86400),'web.preview_port':(1024,65535),
             'http.connection_limit':(4,128),'http.handshake_limit':(1,32),'http.handshake_timeout':(1,30)}
     for key,(lo,hi) in bounds.items():
         section,field=key.split('.');value=result[section][field]
         if type(value) is not int or not lo<=value<=hi:raise ValueError('runtime setting outside supported range')
     for value in result['http']['lane_limits'].values():
         if type(value) is not int or not 1<=value<=128:raise ValueError('invalid HTTP lane budget')
+    engines=result['desktop']['search_engines']
+    if not isinstance(engines,list) or not 1<=len(engines)<=3 or any(type(v) is not str or v not in ('google','bing','baidu') for v in engines) or len(set(engines))!=len(engines):raise ValueError('invalid public search engine order')
     if type(result['desktop']['browser_vision']) is not bool:raise ValueError('invalid browser vision capability')
     if result['desktop']['cdp_port']==result['desktop']['probe_cdp_port']:raise ValueError('browser and diagnostic ports must differ')
     if result['desktop']['renderer'] not in ('gles2','pixman'):raise ValueError('unsupported compositor renderer')

@@ -62,6 +62,14 @@
 
 `options.desktop.browser_vision`（布尔，默认 `true`）控制浏览器的截图图片输入与定位工具。纯文本后端设 `false`；环境 `DESKPET_BROWSER_VISION=0|1` 可覆盖。它复用当前模型，不自动添加另一家模型或凭据。坐标新鲜度、隐私与命中检查见 [DESKTOP.md](DESKTOP.md)。
 
+## 浏览器搜索切换
+
+`options.desktop.search_timeout_seconds` 为一次公开搜索导航或首次读取的等待预算，默认 8 秒，范围 2–20 秒。`search_engines` 是候选顺序，默认 `["google", "bing", "baidu"]`，允许调整顺序或只保留其中部分；不需要新的 API Key。已失败的引擎在当前任务内暂停重试 120 秒。
+
+失败时保留原搜索词，给执行模型返回其他候选入口，由模型选择继续；只有确认本任务的挂起搜索标签已关闭，才解除这次搜索导航的待核对状态。所有候选都不可用时如实停止。明确“只用某个引擎”的要求会限制推荐候选。网页登录、私密填写、注册提交及未知点击不采用此恢复规则；切换搜索引擎也不代表已查到资料。
+
+升级可选桌面组件时，应同时同步共享的 `runtime_config.py` 与 `runtime.defaults.json` 到配置指定的软件目录，再使用新增配置字段，避免旧组件拒绝新字段。纯默认使用不要求用户编辑配置。
+
 ## 任务运行参数
 
 `options.tasks` 可覆盖 `context_bytes`（默认 32768，范围 8192–65536）、`completion_rounds`（3，1–5）、`queue_limit`（8，1–32）、`command_timeout_seconds`（受管理命令默认 600，30–1800）、`skill_active_limit`（64，16–256）、`skill_select_limit`（4，1–8）。这些是容量和执行预算，不是安全开关。普通同步命令仍采用 120 秒上限；较长的已授权步骤使用受管理句柄。具体恢复和验收行为见 [TASKS.md](TASKS.md)。

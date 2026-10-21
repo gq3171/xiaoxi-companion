@@ -30,7 +30,13 @@
     "drm_device": "/dev/dri/renderD128",
     "max_fps": 15,
     "headless_idle_seconds": 300,
-    "browser_vision": true
+    "browser_vision": true,
+    "search_timeout_seconds": 8,
+    "search_engines": [
+      "google",
+      "bing",
+      "baidu"
+    ]
   },
   "web": {
     "preview_port": 18791

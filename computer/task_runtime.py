@@ -121,6 +121,10 @@ def evidence(store, job):
                 # source, and needlessly sends the executor back to open it.
                 url=page.get('url') if isinstance(page,dict) and page.get('url') else value.get('url')
                 if isinstance(url,str) and len(url.encode())<=2048 and url.startswith(('https://','http://')):safe['observed_url']=url
+                if value.get('search_failed') is True:
+                    safe.update({k:value[k] for k in ('search_engine','search_navigation_reconciled','information_verified','related_step','proof') if k in value})
+                    url=value.get('search_url')
+                    if isinstance(url,str) and len(url.encode())<=2048 and url.startswith('https://'):safe['requested_search_url']=url
                 if item['kind']=='private_input':safe={k:value[k] for k in ('filled','continuation_clicked','owner_approved') if type(value.get(k)) is bool}
                 output=json.dumps(safe,ensure_ascii=False) if safe else output
         except (ValueError,TypeError):pass
@@ -147,6 +151,20 @@ def judge_refs(store,job,refs,revision):
         facts=store.db.execute('SELECT ordinal,action,exit_code,revision,verified FROM task_events WHERE job=?',(job,)).fetchall()
     with store.lock:actual={r['ordinal'] for r in store.db.execute('SELECT ordinal FROM steps WHERE job=?',(job,))}
     proof={r['ordinal'] for r in facts if r['revision']==revision and r['exit_code']==0 and (r['verified'] or r['action']=='browser_snapshot')}
+    # A native connectivity observation can substantiate the exact failed
+    # search attempt it inspected. It cannot validate arbitrary errors, old
+    # revisions, form submissions or the information being searched for.
+    with store.lock:
+        rows={r['ordinal']:dict(r) for r in store.db.execute('SELECT ordinal,kind,exit_code,output FROM steps WHERE job=?',(job,))}
+    current_failures={r['ordinal'] for r in facts if r['revision']==revision and r['action']=='browser_open' and r['exit_code']==1}
+    for event in facts:
+        if event['revision']!=revision or event['action']!='browser_search_status' or event['exit_code']!=0 or not event['verified']:continue
+        try:
+            if rows[event['ordinal']]['kind']!='browser_search_status' or rows[event['ordinal']]['exit_code']!=0:continue
+            value=json.loads(rows[event['ordinal']]['output']);parent=value['related_step'];original=rows[parent];failed=json.loads(original['output'])
+            from browser_search import request as search_request
+            if type(parent) is int and parent in current_failures and original['kind']=='browser_open' and original['exit_code']==1 and value.get('proof')=='search_connection_unavailable' and value.get('information_verified') is False and value.get('search_navigation_reconciled') is True and failed.get('search_failed') is True and failed.get('search_navigation_reconciled') is True and value.get('search_url')==failed.get('search_url') and search_request(value['search_url']):proof.add(parent)
+        except (KeyError,ValueError,TypeError):continue
     return set(refs)<=actual and bool(set(refs)&proof)
 
 

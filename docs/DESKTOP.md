@@ -85,3 +85,16 @@ python3 computer/browser_workflow_probe.py \
 场景包括订阅弹窗与页脚、真实登录和注册资料、验证码上下文、新标签/延迟新标签、标签容量、无导航点击、失效引用、网络错误、私密填写撤销和跨文档拒绝、字段脱敏及长观察序列化。`--regression-source /PREVIOUS_SOFTWARE` 可在同一夹具上复现旧版本的表单误判、新标签和计划布局问题；旧版出现预期失败用于证明回归有效，不能当作新版通过。
 
 显式加 `--model` 才会使用当前配置的云模型，覆盖公开多页比较、脚本阻止导航后的换路，以及合成私密登录后继续验收。它会消耗该服务额度，不切换备用服务；账号密码为夹具生成的假数据，不接触真实账户。可用 `--scenario research|no_navigation|private_login` 单独排查。模型任务仍需通过独立验收，超时、无进展或证据不足均计为失败。合成回归不能代替目标网站的实际适配，也不验证 noVNC 的画面传输和麦克风。
+
+
+公开搜索挂起恢复的真实 Chromium 夹具：
+
+```sh
+python3 computer/search_recovery_probe.py \
+  --work-root /YOUR_TEST_STORAGE/browser-fixtures \
+  --port 19224 --report /YOUR_TEST_STORAGE/search-report.json
+```
+
+与上面的探针一样，root 需指定普通 `--browser-user`，目录祖先要允许该用户通行。另需 OpenSSL。测试生成一次性证书，并仅在临时 Chromium 中允许该证书的 SPKI；通过只绑定 loopback 的 HTTPS 代理模拟 Google/Bing/Baidu，不修改系统 CA 或真实代理配置。失败引擎接收连接后一直不返回 HTTP 响应，用于复现“没有文档、读取也挂起”的缺陷。覆盖 Google→Bing、前两者失败→Baidu、全部失败，以及保留的搜索检查点恢复。
+
+显式加 `--model` 才调用配置的模型，由模型自己完成 Google→Bing、前两者失败→Baidu，以及全部不可达后的如实失败，不用脚本代替模型作决定。浏览器本身不连接外部站点，不使用真实账户。`--regression-source` 可以复现旧版 25 秒超时后没有可恢复结果的问题。原生 `browser_search_status` 记录只证明特定搜索连接失败，供验收识别“已尝试但不可达”，避免又要求重新打开失败引擎；它不能代替替代来源的正文读取和 `browser_check`。真实网站的反爬、验证码、内容加载仍需按实际页面判断，不能把可达或切换成功当作资料查证成功。

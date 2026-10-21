@@ -4,6 +4,7 @@ Element references come only from the current AX snapshot, never selectors or
 JavaScript invented by the model. This module doesn't start any browser on import.
 """
 from __future__ import annotations
+from contextlib import contextmanager,nullcontext
 import base64
 import hashlib
 import json
@@ -23,6 +24,10 @@ BROWSER_HOME=browser_root()
 
 
 class BrowserUnavailable(RuntimeError): pass
+class BrowserTimedOut(BrowserUnavailable): pass
+class BrowserSearchFailed(BrowserUnavailable):
+    def __init__(self,result):
+        super().__init__(result['error']);self.result=result
 class BrowserNotDispatched(BrowserUnavailable):
     """Known validation failure before any input event was dispatched."""
     pass
@@ -40,14 +45,21 @@ class CDP:
             raise ValueError('unexpected local debugger endpoint')
         self.ws=websocket.create_connection(url,timeout=.5,suppress_origin=True,skip_utf8_validation=True,
                                             http_proxy_host=None,http_no_proxy=['127.0.0.1'])
-        self.serial=0;self.cancelled=cancelled
+        self.serial=0;self.cancelled=cancelled;self._deadline=None
+
+    @contextmanager
+    def budget(self,seconds):
+        previous=self._deadline;self._deadline=min(previous or float('inf'),time.monotonic()+seconds)
+        try:yield
+        finally:self._deadline=previous
 
     def call(self, method, params=None):
         import websocket
         if self.cancelled():raise BrowserCancelled('任务已停止')
+        if self._deadline is not None and time.monotonic()>=self._deadline:raise BrowserTimedOut('浏览器读取预算已用完')
         self.serial+=1;serial=self.serial
         self.ws.send(json.dumps(dict(id=serial,method=method,params=params or {})))
-        deadline=time.monotonic()+25
+        deadline=min(time.monotonic()+25,self._deadline or float('inf'))
         while time.monotonic()<deadline:
             if self.cancelled():raise BrowserCancelled('任务已停止，网页操作结果需核对')
             try:wire=self.ws.recv()
@@ -57,7 +69,7 @@ class CDP:
             if value.get('id')!=serial:continue
             if 'error' in value:raise BrowserUnavailable('网页元素已变化或浏览器操作失败，请重新读取页面')
             return value.get('result',{})
-        raise BrowserUnavailable('浏览器操作超时，未自动重试可能有副作用的动作')
+        raise BrowserTimedOut('浏览器操作超时，未自动重试可能有副作用的动作')
 
     def evaluate(self, expression):
         value=self.call('Runtime.evaluate',dict(expression=expression,returnByValue=True))
@@ -72,7 +84,7 @@ class Browser:
         self.job_id=job_id;self.workspace=Path(workspace);self.cancelled=cancelled
         self.tabs={};self.snapshots={};self.current=None;self.owned_targets=set()
         self.opener=build_opener(ProxyHandler({}))
-        self.ready=False;self.control=None;self.requested_urls={};self.failed_origins={};self._popup_opener=None;self._nav_attempts={}
+        self.ready=False;self.control=None;self.requested_urls={};self.failed_origins={};self._popup_opener=None;self._nav_attempts={};self.search_loading={};self.failed_engines={}
 
     def json_request(self, path, method='GET', cleanup=False):
         if self.cancelled() and not cleanup:raise BrowserCancelled('任务已停止')
@@ -131,12 +143,40 @@ class Browser:
         metadata={x['targetId']:x for x in infos}
         return [dict(tab=tab,title=metadata.get(tab,{}).get('title',''),url=metadata.get(tab,{}).get('url','')) for tab in self.tabs]
 
+    def public_search(self,url):
+        from browser_search import request
+        if getattr(self,'_privacy_tainted',False) or getattr(self,'_privacy_recovery',False) or getattr(self,'_private_values',[]) or not getattr(self,'search_guard',lambda:True)():return None
+        return request(url)
+
+    def arm_search_recovery(self):
+        # Called only for a saved, unresolved browser_open by the executor.
+        url=self.requested_urls.get(self.current,'');search=self.public_search(url)
+        if search:self.search_loading[self.current]=search
+        return url if search else None
+
+    def search_failure(self,search,tab=None):
+        from browser_search import alternatives
+        if self.cancelled():raise BrowserCancelled('任务已停止')
+        if tab:
+            # Reconcile this local navigation by verified target disappearance,
+            # not by clearing an arbitrary unknown-effect flag. No form replay.
+            with self.control.budget(3) if hasattr(self.control,'budget') else nullcontext():
+                proof=self.close_tab(tab)
+            if not proof.get('closed'):raise BrowserUnavailable('搜索标签关闭结果未确认，保留待核对状态')
+            self.search_loading.pop(tab,None)
+        self.failed_engines[search['engine']]=time.time()
+        self.failed_origins[urlsplit(search['url']).netloc.lower()]=time.time()
+        choices=alternatives(search,self.failed_engines,getattr(self,'_owner_form_intent',''))
+        return BrowserSearchFailed(dict(error='当前搜索引擎连接失败或加载超时，请保持查询目标并更换搜索引擎。',search_failed=True,search_engine=search['engine'],query=search['query'],search_url=search['url'],closed_tab=tab,search_navigation_reconciled=True,verification=False,alternatives=choices,next_action='用browser_open打开alternatives中的可达搜索引擎；不再等待刚失败的引擎。' if choices else '允许的搜索引擎已无可用候选，如实说明失败，不循环重试。'))
+
     def open(self, url, tab=None):
         parsed=urlsplit(url)
         if parsed.scheme not in ('http','https') or not parsed.hostname or parsed.username or parsed.password:
             raise ValueError('网页地址需要无内嵌凭据的HTTP或HTTPS地址')
         self.ensure()
+        search=self.public_search(url)
         host=parsed.netloc.lower();failed=self.failed_origins.get(host,0)
+        if search and (time.time()-self.failed_engines.get(search['engine'],0)<120 or time.time()-failed<120):raise self.search_failure(search)
         if time.time()-failed<120:raise BrowserNotDispatched('该站点刚出现实际网络错误，请先使用可达来源或官网站内导航；稍后可重试。')
         if tab is None:
             if len(self.tabs)>=3:raise BrowserNotDispatched('本任务最多三个标签；可用browser_open(url,tab=本任务已有标签)在原标签导航。')
@@ -147,10 +187,17 @@ class Browser:
             page=self.tabs[tab]
         self.current=tab;self.snapshots.pop(tab,None);self._popup_opener=None
         self.requested_urls[tab]=url
-        page.call('Page.enable');page.call('Accessibility.enable')
-        result=page.call('Page.navigate',dict(url=url))
+        if search:self.search_loading[tab]=search
+        try:
+            with page.budget(settings()['desktop']['search_timeout_seconds']) if search and hasattr(page,'budget') else nullcontext():
+                page.call('Page.enable');page.call('Accessibility.enable')
+                result=page.call('Page.navigate',dict(url=url))
+        except BrowserTimedOut:
+            if search:raise self.search_failure(search,tab)
+            raise
         if result.get('errorText'):
             if 'ERR_' in result['errorText']:self.failed_origins[host]=time.time()
+            if search:raise self.search_failure(search,tab)
             raise BrowserUnavailable('页面未能打开；请先观察当前页并换用可达来源')
         return dict(tab=tab,navigation_requested=True,verification=False)
 
@@ -186,6 +233,22 @@ class Browser:
         return dict(tab=tab,navigation_requested=True,verification=False,scope='task_artifact_preview')
 
     def snapshot(self, tab=None):
+        target=tab or self.current;search=self.search_loading.get(target)
+        if search and not self.public_search(search['url']):search=None
+        page=self.tabs.get(target)
+        try:
+            with page.budget(settings()['desktop']['search_timeout_seconds']) if search and hasattr(page,'budget') else nullcontext():
+                if search:page.call('Page.enable');page.call('Accessibility.enable')
+                value=self._snapshot(tab)
+        except BrowserTimedOut:
+            if search:raise self.search_failure(search,target)
+            raise
+        if search:
+            if value.get('navigation_error'):raise self.search_failure(search,target)
+            if value.get('text'):self.search_loading.pop(target,None)
+        return value
+
+    def _snapshot(self, tab=None):
         if tab is None and self._popup_opener:
             opener,previous=self._popup_opener;self.follow_popup(opener,previous)
         page=self.page(tab);tab=self.current

@@ -2,7 +2,7 @@
 import json,re,time
 from pathlib import Path
 from task_context import redact,bounded_json
-from browser_tools import BrowserBlocked,BrowserUnavailable,BrowserCancelled,BrowserNotDispatched
+from browser_tools import BrowserBlocked,BrowserUnavailable,BrowserCancelled,BrowserNotDispatched,BrowserSearchFailed
 from desktop_browser import DesktopBrowser
 from desktop_jobs import broker,DesktopBusy
 from private_input import inputs,wipe
@@ -29,6 +29,7 @@ def run_desktop(worker,job,messages=None,first=None,ordinal=1,checked=False,last
         pending_effect=dict(step=ordinal-1,action='interrupted_action',observed=False)
     from task_progress import ProgressGuard
     from desktop_lifecycle import BrowserSession,authorize_shutdown
+    browser.search_guard=lambda:not pending_effect or pending_effect.get('action')=='browser_open'
     progress=ProgressGuard();session_closed=bool((saved or {}).get('browser_session_closed'))
     def checkpoint(uncertain=None,phase='running'):
         nonlocal messages
@@ -90,11 +91,19 @@ def run_desktop(worker,job,messages=None,first=None,ordinal=1,checked=False,last
     def stopped():
         status='interrupted' if worker.stop.is_set() else 'cancelled';store.update(job_id,status,'桌面任务已停止，页面和进度保留，未重复提交。');state.phase(job_id,'interrupted' if status=='interrupted' else 'done')
     recovery_revision=store.tasks.revision(job_id)
-    def recovery_proof(action,value):
+    def search_status(result,related_step):
+        nonlocal ordinal
+        from browser_search import request as search_request
+        search=search_request(result.get('search_url'))
+        if not search or result.get('search_navigation_reconciled') is not True:return
+        proof=dict(proof='search_connection_unavailable',related_step=related_step,search_failed=True,search_engine=search['engine'],search_url=search['url'],search_navigation_reconciled=True,information_verified=False,error='此搜索连接失败已确认；没有核实该引擎上的资料。')
+        output=redact(json.dumps(proof,ensure_ascii=False));store.record(job_id,ordinal,'browser_search_status','native task-owned search observation',0,output)
+        store.tasks.outcome(job_id,ordinal,'browser_search_status',0,output,verified=True,revision=store.tasks.revision(job_id));ordinal+=1
+    def recovery_proof(action,value,verified=True):
         nonlocal ordinal
         output=redact(json.dumps(value,ensure_ascii=False))
         store.record(job_id,ordinal,action,'passive recovery verification',0,output)
-        store.tasks.outcome(job_id,ordinal,action,0,output,True,revision=recovery_revision);ordinal+=1
+        store.tasks.outcome(job_id,ordinal,action,0,output,verified,revision=recovery_revision);ordinal+=1
     try:
         if saved and (session_closed or pending_effect and pending_effect.get('action')=='browser_shutdown'):
             # No page exists after browser shutdown. Verify the passive session
@@ -124,16 +133,33 @@ def run_desktop(worker,job,messages=None,first=None,ordinal=1,checked=False,last
                     restored['tabs']=[x for x in restored.get('tabs',[]) if x!=target]
                     restored['owned']=[x for x in restored.get('owned',[]) if x!=target]
                     if restored.get('current')==target:restored['current']=next(iter(restored['tabs']),None)
-            browser.restore(restored)
+            if pending_effect and pending_effect.get('action')=='browser_open' and hasattr(browser,'restore_search'):browser.restore_search(restored)
+            else:browser.restore(restored)
+            recovery_search=browser.arm_search_recovery() if pending_effect and pending_effect.get('action')=='browser_open' and hasattr(browser,'arm_search_recovery') else None
             if browser.tabs:
-                value=browser.snapshot();observe(value)
-                if pending_effect:pending_effect['observed']=True
-                if value.get('needs_human'):handoff(value['blocked_reason'])
-                elif hasattr(browser,'private_form'):
-                    try:
-                        form=browser.private_form()
-                        if form and form['fields']:handoff('当前页面需要主人补充信息。')
-                    except (ValueError,BrowserUnavailable,BrowserBlocked):pass
+                try:
+                    if recovery_search:
+                        with state.action(job_id,recovery_revision):value=browser.snapshot()
+                    else:value=browser.snapshot()
+                except BrowserSearchFailed as error:
+                    if not recovery_search or error.result.get('search_url')!=recovery_search or not error.result.get('search_navigation_reconciled'):raise
+                    pending_effect=None;value=None;observe(error.result);recovery_proof('browser_search_failure',error.result,verified=False);search_status(error.result,None);checkpoint()
+                except DesktopBusy:
+                    # Recovery must not return with an orphaned running job
+                    # when the owner takes control before the first read.
+                    with state.condition:
+                        if store.tasks.revision(job_id)==recovery_revision:
+                            checkpoint(phase='interrupted');store.update(job_id,'interrupted','桌面正由主人接管，任务与待核对页面已保留，交回后可继续。',expected_revision=recovery_revision)
+                    return
+                if value is not None:
+                    observe(value)
+                    if pending_effect:pending_effect['observed']=True
+                    if value.get('needs_human'):handoff(value['blocked_reason'])
+                    elif hasattr(browser,'private_form'):
+                        try:
+                            form=browser.private_form()
+                            if form and form['fields']:handoff('当前页面需要主人补充信息。')
+                        except (ValueError,BrowserUnavailable,BrowserBlocked):pass
             messages.append({'role':'user','content':'恢复核对：之前的操作可能已经生效。以刚读取的实际页面为准，不重放旧点击或注册提交。'})
         while ordinal<=80 and decisions<160:
             if worker.cancelled(job_id):stopped();return
@@ -226,11 +252,12 @@ def run_desktop(worker,job,messages=None,first=None,ordinal=1,checked=False,last
                 observe({'error':'前一步可能已经生效。只能先browser_snapshot，再browser_check核对具体当前结果；未重复操作。'});continue
             if action in MUTATIONS:
                 pending_effect=dict(step=ordinal,action=action,observed=False)
+                if action=='browser_open':pending_effect['url']=reply.get('url','')
                 if action=='browser_close':pending_effect['tab']=tab or browser.current
                 if action=='workspace_write':
                     import hashlib
                     pending_effect.update(name=reply.get('name'),sha256=hashlib.sha256(str(reply.get('text','')).encode()).hexdigest())
-            checkpoint();result={};code=0;passed=False
+            checkpoint();result={};code=0;passed=False;search_observed=False
             try:
                 with state.action(job_id,revision):
                     store.update(job_id,'running',str(reply.get('message') or '正在核对并操作实际网页。'))
@@ -277,6 +304,9 @@ def run_desktop(worker,job,messages=None,first=None,ordinal=1,checked=False,last
             except DesktopBusy:
                 if action in MUTATIONS:pending_effect=None
                 checkpoint();continue
+            except BrowserSearchFailed as error:
+                result=error.result;code=1;search_observed=result.get('search_navigation_reconciled') is True
+                if result.get('search_navigation_reconciled') and (not pending_effect or pending_effect.get('action')=='browser_open' and pending_effect.get('url')==result.get('search_url')):pending_effect=None
             except BrowserBlocked as error:
                 # Never persist a password/OTP candidate from a rejected type action.
                 if action in MUTATIONS:pending_effect=None
@@ -310,6 +340,7 @@ def run_desktop(worker,job,messages=None,first=None,ordinal=1,checked=False,last
             if worker.key:command=command.replace(worker.key,'[服务凭据已隐藏]');output=output.replace(worker.key,'[服务凭据已隐藏]')
             store.record(job_id,ordinal,str(action),command,code,output);ordinal+=1
             store.tasks.outcome(job_id,ordinal-1,str(action),code,output,passed,revision=revision)
+            if search_observed:search_status(result,ordinal-1)
             messages.append({'role':'assistant','content':command});observe(result);checkpoint()
             nav_replan,nav_stalled=progress.navigation(result)
             if nav_replan:observe(dict(replan_required=True,no_navigation=True,next='输入已发出但没有导航进展；不要重复点击，核对新标签或在已有任务tab打开工具返回的requested_url。'))
