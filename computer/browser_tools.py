@@ -167,7 +167,7 @@ class Browser:
         self.failed_engines[search['engine']]=time.time()
         self.failed_origins[urlsplit(search['url']).netloc.lower()]=time.time()
         choices=alternatives(search,self.failed_engines,getattr(self,'_owner_form_intent',''))
-        return BrowserSearchFailed(dict(error='当前搜索引擎连接失败或加载超时，请保持查询目标并更换搜索引擎。',search_failed=True,search_engine=search['engine'],query=search['query'],search_url=search['url'],closed_tab=tab,search_navigation_reconciled=True,verification=False,alternatives=choices,next_action='用browser_open打开alternatives中的可达搜索引擎；不再等待刚失败的引擎。' if choices else '允许的搜索引擎已无可用候选，如实说明失败，不循环重试。'))
+        return BrowserSearchFailed(dict(error='当前搜索引擎连接失败或加载超时，请保持查询目标并更换搜索引擎。',search_failed=True,search_engine=search['engine'],query=search['query'],search_url=search['url'],closed_tab=tab,search_navigation_reconciled=True,verification=False,alternatives=choices,next_action='用browser_open打开alternatives中的可达搜索引擎；不再等待刚失败的引擎。' if choices else '允许的搜索引擎已无可用候选；若没有已知可达的其他来源，返回action=finish,state=failed，如实说明未查到。无需browser_check核验不存在的结果页，不循环重试。'))
 
     def open(self, url, tab=None):
         parsed=urlsplit(url)
